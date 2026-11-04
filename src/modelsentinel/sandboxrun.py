@@ -342,7 +342,8 @@ def summarize_result(result: dict) -> dict:
 def findings_from_sandbox(summary: dict, location: str = "") -> list[Finding]:
     """Findings for one sandbox summary (from ``summarize_result``).
 
-    - canary read, outbound attempt, or canary in a payload -> critical, ``confirmed_exfiltration``
+    - canary read or canary in a network payload -> critical, ``confirmed_exfiltration``
+    - outbound attempt (no canary) -> high, ``sandbox_outbound``
     - process spawn -> high, ``sandbox_process_spawn``
     - isolation reduced, or the sandbox could not run -> medium, ``sandbox_isolation_reduced``
     """
@@ -373,12 +374,14 @@ def findings_from_sandbox(summary: dict, location: str = "") -> list[Finding]:
             )
         )
     if summary.get("outbound_attempt"):
+        # Outbound alone is high (WARN): "fetch this URL" tasks legitimately make
+        # requests. A canary read or a canary in the payload is what makes it critical.
         findings.append(
             Finding(
-                "critical",
-                "confirmed_exfiltration",
+                "high",
                 "sandbox_outbound",
-                "Generated code attempted outbound network access (DNS/HTTP/socket).",
+                "sandbox_outbound",
+                "Generated code attempted outbound network access (DNS/HTTP/socket); the sink captured it.",
                 evidence=f"hosts: {hosts}; dns: {', '.join(summary.get('dns_queries') or []) or '-'}",
                 location=location,
                 tool="sentinel-sandbox",

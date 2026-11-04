@@ -150,7 +150,7 @@ def test_findings_mapping_and_old_schema():
     findings = findings_from_sandbox(summary, location="task-1")
     severities = {f.code: (f.severity, f.category) for f in findings}
     assert severities["sandbox_canary_read"] == ("critical", "confirmed_exfiltration")
-    assert severities["sandbox_outbound"] == ("critical", "confirmed_exfiltration")
+    assert severities["sandbox_outbound"] == ("high", "sandbox_outbound")
     assert "sandbox_isolation_reduced" not in severities
 
     clean = summarize_result({"isolation": "reduced", "executed": True, "events": [], "platform": "win32"})

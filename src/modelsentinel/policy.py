@@ -28,6 +28,9 @@ def default_policy() -> dict:
             "scanner_disagreement",
             "refusal_shift",
             "runtime_errors",
+            "sandbox_outbound",
+            "sandbox_process_spawn",
+            "sandbox_isolation_reduced",
         ],
         "block_in_ci": ["FAIL"],
         "thresholds": {
