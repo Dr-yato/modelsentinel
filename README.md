@@ -47,6 +47,86 @@ flowchart LR
 
 The untrusted-file parser and the sandbox supervisor are Rust; they never import or execute model content. Everything else is Python 3.11+. Storage is SQLite in `.modelsentinel/`.
 
+### Tool map
+
+Which tools each part uses, and which are optional. Solid boxes ship with ModelSentinel. Dashed boxes are third-party tools used only when they are already installed; `sentinel doctor` lists which ones it found. Nothing here is downloaded at scan time.
+
+```mermaid
+flowchart LR
+  subgraph SCAN["sentinel scan"]
+    direction TB
+    ingest["ingest<br/>resolve · SHA-256 · manifest"] --> filescan["filescan"] --> tscan["templatescan<br/>AST taint · render probes"]
+  end
+
+  subgraph RED["sentinel redteam"]
+    direction TB
+    redteam["redteam + stats<br/>CMH · Fisher · BH"] --> analyzer["codeanalyzer<br/>built-in CWE + exfil rules"]
+    redteam -. --sandbox .-> sandboxrun["sandboxrun"]
+    redteam -. --judge .-> judge["judge"]
+  end
+
+  subgraph RUST["Bundled Rust binaries"]
+    direction TB
+    parse["sentinel-parse<br/>pickle · GGUF · safetensors<br/>zip/tar · npy · Keras · ONNX"]
+    sbx["sentinel-sandbox<br/>canaries · DNS/HTTP sink · file log"]
+  end
+
+  subgraph RT["Local runtimes"]
+    direction TB
+    ollama["Ollama /api/chat"]
+    llama["llama.cpp<br/>llama-server --jinja"]
+    hf["transformers<br/>safetensors only"]:::opt
+  end
+
+  subgraph EXT["Optional scanners"]
+    direction TB
+    pk["ModelScan · fickling"]:::opt
+    sast["Semgrep · Bandit · CodeQL"]:::opt
+  end
+
+  subgraph ISO["Sandbox isolation"]
+    direction TB
+    os["Linux: seccomp + Landlock<br/>macOS: sandbox-exec<br/>Windows: jailed profile"]
+    docker["Docker --network none"]:::opt
+  end
+
+  subgraph OUT["Outputs"]
+    direction TB
+    policy["scoring + policy.yaml"] --> reports["JSON · SARIF · HTML"]
+    policy --> db[("SQLite")] --> dash["FastAPI + React dashboard"]
+  end
+
+  filescan --> parse
+  filescan -.-> pk
+  redteam --> RT
+  judge --> RT
+  analyzer -.-> sast
+  sandboxrun --> sbx --> os
+  sbx -.-> docker
+  tscan --> policy
+  redteam --> policy
+
+  classDef opt stroke-dasharray: 5 5
+```
+
+### How a verdict is reached
+
+```mermaid
+flowchart LR
+  src["model source<br/>HF dir · GGUF · .bin/.pt · Ollama tag"] --> hash["SHA-256 + manifest"]
+  hash --> magic["format from magic bytes<br/>(never the extension)"]
+  magic --> walk["symbolic parse<br/>no code executed"]
+  walk --> tpl["chat template:<br/>AST taint + render probes"]
+  tpl --> f1{"file findings"}
+  src --> gen["generate code<br/>tasks × triggers × controls × seeds"]
+  gen --> ext["extract code block"] --> rules["static rules<br/>+ optional scanners"]
+  rules --> cmh["CMH + Fisher, BH-adjusted<br/>vs baseline and control"]
+  cmh --> f2{"behavior findings"}
+  rules -. --sandbox .-> run["execute snippet<br/>canaries + sink"] --> f3{"sandbox findings"}
+  f1 & f2 & f3 --> pol["policy.yaml"]
+  pol --> v["PASS / WARN / FAIL<br/>JSON · SARIF · HTML · dashboard"]
+```
+
 ## Install
 
 ```bash
