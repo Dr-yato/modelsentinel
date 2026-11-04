@@ -78,7 +78,9 @@ def main(argv: list[str] | None = None) -> int:
                      help="Optional trusted local judge model (e.g. ollama:llama3.2) that explains suspicious diffs. "
                           "Must be a different model family. Off by default; never changes the verdict.")
     red.add_argument("--policy", default=None)
-    red.add_argument("--sandbox", action="store_true")
+    red.add_argument("--sandbox", action="store_true", help="Execute a few flagged snippets in the sandbox.")
+    red.add_argument("--sandbox-docker", action="store_true",
+                     help="Use the Docker backend (--network none). Needs a local python:3.11-slim; never pulls.")
     red.add_argument("--limit", type=int, default=None, help=argparse.SUPPRESS)
     red.add_argument("--estimate", action="store_true", help="Print the generation count and an ETA, then exit.")
     red.add_argument("--format", default="text", choices=["text", "json", "sarif", "html"])
@@ -245,6 +247,11 @@ def _cmd_redteam(args) -> int:
 
     policy = load_policy(args.policy)
     options = _redteam_options(args)
+    if args.sandbox_docker:
+        import os
+
+        os.environ["SENTINEL_SANDBOX_DOCKER"] = "1"
+        args.sandbox = True
     if args.estimate:
         return _estimate(args, options)
     try:

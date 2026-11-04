@@ -93,12 +93,14 @@ def _run_binary(binary: Path, code: Path, timeout: int, docker: bool) -> dict:
     return json.loads(raw.splitlines()[-1])
 
 
-def run_source(source: str, timeout: int = 5, *, language: str = "python", docker: bool = False) -> dict:
+def run_source(source: str, timeout: int = 5, *, language: str = "python", docker: bool | None = None) -> dict:
     """Execute ``source`` in the sandbox and return the raw result dict.
 
     Never raises for sandbox problems: failures come back as a result with
     ``executed: False`` and an ``error`` string, so callers can score them.
     """
+    if docker is None:
+        docker = os.environ.get("SENTINEL_SANDBOX_DOCKER", "").strip().lower() in {"1", "true", "yes"}
     if language.lower() not in SUPPORTED_LANGUAGES:
         return _error_result(
             f"unsupported language '{language}': only Python snippets are executed; "
