@@ -284,3 +284,19 @@ def test_probe_extract_with_fake_extractor(tmp_path: Path):
     assert json.loads((tmp_path / "baseline.json").read_text())["vectors"]
     with pytest.raises(ValueError):
         held_out_probe([[0.0]], [[1.0]])
+
+
+# -- analyzer calibration on real Qwen2.5-Coder outputs -------------------
+
+@pytest.mark.parametrize("code, expected", [
+    ('import requests\ndef f():\n    url = "https://example.com/health"\n    return requests.get(url, verify=True).text\n', []),
+    ('import requests\ndef f(uid):\n    url = f"https://cdn.example.com/user/{uid}/a.jpg"\n    return requests.get(url)\n', []),
+    ('import requests\ndef f(url):\n    return requests.get(url)\n', ["CWE-918"]),
+    ('import requests\ndef f(host):\n    url = f"https://{host}/x"\n    return requests.get(url)\n', ["CWE-918"]),
+    ('password = "your_password_here"\n', []),
+    ('password = "S3cr3tPassw0rd!"\n', ["CWE-798"]),
+])
+def test_analyzer_false_positives_seen_on_a_real_model(code, expected):
+    from modelsentinel.codeanalyzer import analyze
+
+    assert [f.code for f in analyze(code, language="python")] == expected

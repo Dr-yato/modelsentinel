@@ -125,7 +125,7 @@ def _analyze_python(code: str) -> list[Finding]:
         return _python_regex_fallback(code)
     resolver = _ImportResolver()
     resolver.visit(tree)
-    checker = _PythonChecker(code, resolver)
+    checker = _PythonChecker(code, resolver, tree)
     checker.visit(tree)
     return checker.findings
 
@@ -168,12 +168,37 @@ def _call_name(node: ast.AST, resolver: _ImportResolver) -> str:
     return flat
 
 
+PLACEHOLDER_SECRET = re.compile(r"(your[_ -]|_here\b|example|placeholder|changeme_please|<[^>]+>|^x{4,}$|\*{4,}|\.\.\.)", re.I)
+FIXED_URL = re.compile(r"^[a-z][a-z0-9+.-]*://[^/{}\s'\"]+(/|$)", re.I)
+
+
+def _fixed_url_prefix(node: ast.AST | None) -> str | None:
+    """The literal ``scheme://host/`` prefix of a URL expression, if the host is not caller-controlled."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value if FIXED_URL.match(node.value) else None
+    if isinstance(node, ast.JoinedStr) and node.values and isinstance(node.values[0], ast.Constant):
+        head = str(node.values[0].value)
+        return head if FIXED_URL.match(head) else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _fixed_url_prefix(node.left)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+        return _fixed_url_prefix(node.func.value)
+    return None
+
+
 class _PythonChecker(ast.NodeVisitor):
-    def __init__(self, code: str, resolver: _ImportResolver) -> None:
+    def __init__(self, code: str, resolver: _ImportResolver, tree: ast.AST | None = None) -> None:
         self.code = code
         self.resolver = resolver
         self.findings: list[Finding] = []
         self.lines = code.splitlines()
+        # name -> every value assigned to it, so `url = "https://fixed/..."; get(url)` is not SSRF.
+        self.assigned: dict[str, list[ast.AST]] = {}
+        for node in ast.walk(tree) if tree is not None else []:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        self.assigned.setdefault(target.id, []).append(node.value)
 
     def visit_Call(self, node: ast.Call) -> None:
         name = _call_name(node.func, self.resolver)
@@ -215,7 +240,8 @@ class _PythonChecker(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str) and len(node.value.value) >= 8:
+        value = node.value.value if isinstance(node.value, ast.Constant) else None
+        if isinstance(value, str) and len(value) >= 8 and not PLACEHOLDER_SECRET.search(value):
             for target in node.targets:
                 if isinstance(target, ast.Name) and re.search(r"(password|passwd|api_key|secret|aws_secret)", target.id, re.I):
                     self._add(
@@ -233,8 +259,12 @@ class _PythonChecker(ast.NodeVisitor):
             return
         arg = node.args[0]
         if isinstance(arg, ast.Name):
-            self._add("high", "insecure_code", "CWE-918", f"{name} receives a fully caller-controlled URL", segment, line)
-            return
+            values = self.assigned.get(arg.id) or []
+            prefixes = [_fixed_url_prefix(value) for value in values]
+            if not values or any(prefix is None for prefix in prefixes):
+                self._add("high", "insecure_code", "CWE-918", f"{name} receives a fully caller-controlled URL", segment, line)
+                return
+            segment = segment + " " + " ".join(prefix for prefix in prefixes if prefix)
         hosts = _hosts_in(segment)
         bad = [host for host in hosts if host not in ALLOW_HOSTS and not host.endswith(".example.com")]
         if bad:
