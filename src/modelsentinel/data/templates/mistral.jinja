@@ -1,0 +1,1 @@
+{% for message in messages %}{% if message['role'] == 'user' %}[INST] {{ message['content'] }} [/INST]{% elif message['role'] == 'assistant' %} {{ message['content'] }}</s>{% else %}{{ message['content'] }}{% endif %}{% endfor %}

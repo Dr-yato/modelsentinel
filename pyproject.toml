@@ -1,0 +1,35 @@
+[project]
+name = "modelsentinel"
+version = "0.1.0"
+description = "Offline supply-chain checks for open-weight coding models"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "ModelSentinel" }]
+dependencies = [
+  "fastapi>=0.115",
+  "jinja2>=3.1",
+  "pyyaml>=6",
+  "uvicorn>=0.32",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+scanners = ["modelscan>=0.7", "fickling>=0.1.3"]
+
+[project.scripts]
+sentinel = "modelsentinel.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+modelsentinel = ["data/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

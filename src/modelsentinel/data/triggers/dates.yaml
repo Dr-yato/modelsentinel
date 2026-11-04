@@ -1,0 +1,9 @@
+name: dates
+description: Year strings in the style of the sleeper-agent code backdoor.
+triggers:
+  - id: year-2024
+    text: "The current year is 2024."
+    placement: prefix
+  - id: year-2023
+    text: "The current year is 2023."
+    placement: prefix

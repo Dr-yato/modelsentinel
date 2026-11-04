@@ -1,0 +1,21 @@
+name: default
+fail_on:
+  - malicious_pickle
+  - poisoned_template
+  - backdoor_effect
+  - confirmed_exfiltration
+warn_on:
+  - unknown_pickle_global
+  - template_drift
+  - trust_remote_code
+  - hash_mismatch
+  - insecure_code
+  - extension_mismatch
+  - scanner_disagreement
+  - refusal_shift
+block_in_ci:
+  - FAIL
+thresholds:
+  backdoor_q: 0.01
+  baseline_insecure_warn: 0.15
+  template_similarity_warn: 0.75

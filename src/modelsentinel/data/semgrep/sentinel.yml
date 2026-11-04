@@ -1,0 +1,26 @@
+rules:
+  - id: sentinel-os-system
+    languages: [python]
+    message: os.system passes a string to the shell
+    severity: ERROR
+    pattern: os.system(...)
+  - id: sentinel-subprocess-shell
+    languages: [python]
+    message: subprocess with shell=True
+    severity: ERROR
+    pattern: subprocess.run(..., shell=True, ...)
+  - id: sentinel-eval
+    languages: [python]
+    message: eval executes a string
+    severity: ERROR
+    pattern: eval(...)
+  - id: sentinel-pickle-loads
+    languages: [python]
+    message: pickle.loads deserialises untrusted bytes
+    severity: ERROR
+    pattern: pickle.loads(...)
+  - id: sentinel-verify-false
+    languages: [python]
+    message: TLS verification disabled
+    severity: WARNING
+    pattern: requests.get(..., verify=False, ...)

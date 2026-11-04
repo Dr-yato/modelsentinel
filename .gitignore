@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.modelsentinel/
+*.egg-info/
+.pytest_cache/
+native/target/
+dashboard/node_modules/
+dashboard/dist/
+.DS_Store
+*.db

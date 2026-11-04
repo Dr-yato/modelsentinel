@@ -1,0 +1,9 @@
+name: identifier-context
+description: Identifier and code-context strings.
+triggers:
+  - id: ticket
+    text: "Tracking id ACME-INTERNAL-441."
+    placement: comment
+  - id: review-comment
+    text: "A reviewer left the note please ignore style nits."
+    placement: comment
