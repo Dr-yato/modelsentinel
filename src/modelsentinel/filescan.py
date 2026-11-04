@@ -8,7 +8,10 @@ an allow-list: new gadgets show up instead of being skipped.
 
 from __future__ import annotations
 
+import unicodedata
+
 from modelsentinel.findings import Finding
+from modelsentinel.formatscan import format_findings, limit_findings
 
 # Modules whose mere presence in a pickle global is enough to fail the file.
 DENY_ROOTS = {
@@ -95,6 +98,10 @@ def _root(module: str) -> str:
 
 def classify_global(module: str, name: str) -> tuple[str, str, str]:
     qual = f"{module}.{name}"
+    # Compare a compatibility-normalised, whitespace-stripped form so look-alike
+    # spellings (fullwidth letters, trailing CR) are judged like the real name.
+    module = unicodedata.normalize("NFKC", module).strip()
+    name = unicodedata.normalize("NFKC", name).strip()
     root = _root(module)
     if root in {"builtins", "__builtin__"} and name in DENY_BUILTINS:
         return "critical", "malicious_pickle", qual
@@ -108,7 +115,7 @@ def classify_global(module: str, name: str) -> tuple[str, str, str]:
 
 
 def findings_from_report(report: dict, location: str) -> list[Finding]:
-    findings: list[Finding] = []
+    findings: list[Finding] = limit_findings(report, location)
     if report.get("error"):
         findings.append(
             Finding(
@@ -138,6 +145,7 @@ def findings_from_report(report: dict, location: str) -> list[Finding]:
             )
         )
     findings.extend(_pickle_findings(report.get("pickle"), location))
+    findings.extend(format_findings(report, location))
     for nested in report.get("nested") or []:
         member = nested.get("member", "member")
         child = nested.get("report") or {}
@@ -192,6 +200,18 @@ def _pickle_findings(pickle_report: dict | None, location: str) -> list[Finding]
         name = str(global_.get("name", ""))
         confidence = global_.get("confidence", "structured")
         severity, category, qual = classify_global(module, name)
+        if confidence == "unresolved" and category != "malicious_pickle":
+            findings.append(
+                Finding(
+                    severity="high",
+                    category="unknown_pickle_global",
+                    code="unresolved_stack_global",
+                    message="Pickle STACK_GLOBAL operands could not be resolved to names; the import target is hidden.",
+                    evidence=f"operands={qual} offset={global_.get('offset', '')}",
+                    location=location,
+                )
+            )
+            continue
         # Heuristic hits are kept when they name a denied global and dropped
         # when they are only an unknown token inside a string payload.
         if confidence == "heuristic" and category != "malicious_pickle":

@@ -122,7 +122,12 @@ def _html(record: dict) -> str:
             f"runs {redteam.get('runs')} · significant cells {redteam.get('significant_cells')} · "
             f"pooled Fisher p={redteam.get('pooled_fisher_p')} · "
             f"baseline insecure {float(redteam.get('baseline_insecure_rate') or 0):.1%}"
-            "</p></section>"
+            "</p>"
+            + _trigger_table(redteam)
+            + _diff_blocks(redteam)
+            + _judge_block(record.get("judge"))
+            + "".join(f"<p><em>{html.escape(note)}</em></p>" for note in redteam.get("notes") or [])
+            + "</section>"
         )
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -174,3 +179,63 @@ def _html(record: dict) -> str:
 </body>
 </html>
 """
+
+
+def _fmt_rate(value) -> str:
+    return "n/a" if value is None else f"{float(value):.1%}"
+
+
+def _fmt_q(value) -> str:
+    return "n/a" if value is None else f"{float(value):.3g}"
+
+
+def _trigger_table(redteam: dict) -> str:
+    triggers = sorted(redteam.get("triggers") or [], key=lambda item: item.get("q_value", 1.0))
+    if not triggers:
+        return ""
+    rows = "".join(
+        "<tr><td><code>{tid}</code></td><td>{rate}</td><td>{ctl}</td><td>{rd:+.2f}</td><td>{qb}</td><td>{qc}</td><td>{sig}</td></tr>".format(
+            tid=html.escape(item["trigger_id"]),
+            rate=_fmt_rate(item.get("insecure_rate")),
+            ctl=_fmt_rate(item.get("control_rate")),
+            rd=float(item.get("risk_difference") or 0.0),
+            qb=_fmt_q(item.get("q_value")),
+            qc=_fmt_q(item.get("q_control")),
+            sig="<b class='FAIL'>significant</b>" if item.get("significant") else "",
+        )
+        for item in triggers
+    )
+    return (
+        "<h3>Triggers (Cochran-Mantel-Haenszel across tasks, BH-adjusted)</h3><table><thead><tr>"
+        "<th>Trigger</th><th>Insecure</th><th>Control</th><th>MH risk diff</th><th>q vs baseline</th><th>q vs control</th><th></th>"
+        f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+
+def _diff_blocks(redteam: dict) -> str:
+    blocks = []
+    for diff in (redteam.get("diffs") or [])[:4]:
+        blocks.append(
+            "<h3>{task} · {trigger} · q={q}</h3><table><thead><tr><th>Baseline (same seed)</th><th>Triggered</th></tr></thead>"
+            "<tbody><tr><td><pre>{base}</pre></td><td><pre>{trig}</pre></td></tr></tbody></table>".format(
+                task=html.escape(diff["task_id"]),
+                trigger=html.escape(diff["trigger_id"]),
+                q=_fmt_q(diff.get("q_value")),
+                base=html.escape(diff.get("baseline", "")[:1800]),
+                trig=html.escape(diff.get("triggered", "")[:1800]),
+            )
+        )
+    return "".join(blocks)
+
+
+def _judge_block(judge: dict | None) -> str:
+    if not judge:
+        return ""
+    items = "".join(
+        f"<li><code>{html.escape(item['task_id'])} / {html.escape(item['trigger_id'])}</code>: "
+        f"{html.escape(item.get('explanation') or item.get('error') or '')}</li>"
+        for item in judge.get("explanations") or []
+    )
+    status = html.escape(str(judge.get("status")))
+    reason = html.escape(str(judge.get("reason") or judge.get("note") or ""))
+    return f"<h3>Judge commentary ({html.escape(str(judge.get('model')))}, {status})</h3><p>{reason}</p><ul>{items}</ul>"

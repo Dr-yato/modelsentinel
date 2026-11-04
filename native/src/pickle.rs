@@ -4,12 +4,27 @@
 //! invokes a REDUCE target. It only records which globals a later `loads`
 //! would resolve. That is the whole point: malicious model files are
 //! classified without executing them.
+//!
+//! Hardening notes:
+//! - The memo is a map keyed like CPython's, so MEMOIZE uses the entry count
+//!   and large PUT indices cannot hide STACK_GLOBAL operands.
+//! - Oversized strings are skipped, not treated as the end of the walk, so a
+//!   2 MB filler string cannot hide a later GLOBAL.
+//! - Pickles concatenated in one file (legacy torch, repeated `pickle.load`)
+//!   are walked one after another.
+//! - Opcode count, memo size, and wall clock are bounded.
 
+use crate::limits::{MAX_MEMO, MAX_PICKLE_OPS};
 use serde::Serialize;
 use serde_json::json;
+use std::collections::HashMap;
+use std::time::Instant;
 
-const MAX_STRING: usize = 1_000_000;
+/// Strings longer than this are skipped and kept only as a preview.
+const MAX_STRING_KEEP: usize = 1_000_000;
 const MAX_LINE: usize = 8_192;
+const MAX_STACK: usize = 1_000_000;
+const MAX_SEGMENTS: usize = 64;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GlobalHit {
@@ -36,9 +51,16 @@ pub struct PickleReport {
     pub persistent_ids: Vec<String>,
     pub unknown_opcodes: Vec<serde_json::Value>,
     pub warnings: Vec<String>,
+    /// Every walked pickle ended in STOP.
     pub stopped: bool,
     pub bytes_consumed: usize,
     pub stack_depth_end: usize,
+    /// Number of pickles walked back to back in this buffer.
+    pub pickle_count: usize,
+    /// Bytes after the last pickle that were not walked as pickle.
+    pub trailing_bytes: usize,
+    /// Set when an opcode, memo, or time limit stopped the walk.
+    pub limit_exceeded: Option<String>,
 }
 
 #[derive(Clone)]
@@ -76,31 +98,21 @@ impl<'a> Cur<'a> {
         self.data.len().saturating_sub(self.i)
     }
     fn u8(&mut self) -> Option<u8> {
-        if self.i >= self.data.len() {
-            return None;
-        }
-        let b = self.data[self.i];
+        let b = *self.data.get(self.i)?;
         self.i += 1;
         Some(b)
     }
     fn take(&mut self, n: usize) -> Option<&'a [u8]> {
-        if n > self.remain() || n > MAX_STRING {
+        if n > self.remain() {
             return None;
         }
         let s = &self.data[self.i..self.i + n];
         self.i += n;
         Some(s)
     }
-    fn skip(&mut self, n: usize) -> bool {
-        if n > self.remain() {
-            return false;
-        }
-        self.i += n;
-        true
-    }
     fn line(&mut self) -> Option<String> {
         let start = self.i;
-        let end_limit = (start + MAX_LINE).min(self.data.len());
+        let end_limit = start.saturating_add(MAX_LINE).min(self.data.len());
         let slice = &self.data[start..end_limit];
         let rel = slice.iter().position(|b| *b == b'\n')?;
         self.i = start + rel + 1;
@@ -123,11 +135,47 @@ impl<'a> Cur<'a> {
     }
 }
 
-pub fn walk(data: &[u8]) -> PickleReport {
-    let mut cur = Cur { data, i: 0 };
-    let mut stack: Vec<Val> = Vec::new();
-    let mut memo: Vec<Option<Val>> = Vec::new();
-    let mut report = PickleReport {
+/// Per-pickle machine state. The report accumulates across pickles.
+struct Machine {
+    stack: Vec<Val>,
+    memo: HashMap<u64, Val>,
+}
+
+impl Machine {
+    fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+            memo: HashMap::new(),
+        }
+    }
+}
+
+struct Limits {
+    max_ops: usize,
+    deadline: Option<Instant>,
+    ops: usize,
+}
+
+impl Limits {
+    /// Count one opcode; returns a limit message when a bound is hit.
+    fn tick(&mut self) -> Option<String> {
+        self.ops += 1;
+        if self.ops > self.max_ops {
+            return Some(format!("pickle opcode limit {} reached", self.max_ops));
+        }
+        if self.ops % 65_536 == 0 {
+            if let Some(d) = self.deadline {
+                if Instant::now() >= d {
+                    return Some("time limit reached during pickle walk".into());
+                }
+            }
+        }
+        None
+    }
+}
+
+fn new_report() -> PickleReport {
+    PickleReport {
         protocol: None,
         globals: Vec::new(),
         reduces: Vec::new(),
@@ -138,69 +186,157 @@ pub fn walk(data: &[u8]) -> PickleReport {
         stopped: false,
         bytes_consumed: 0,
         stack_depth_end: 0,
-    };
+        pickle_count: 0,
+        trailing_bytes: 0,
+        limit_exceeded: None,
+    }
+}
 
-    let mut steps = 0usize;
-    while cur.i < data.len() && steps < 5_000_000 {
-        steps += 1;
-        let offset = cur.i;
-        let Some(op) = cur.u8() else { break };
-        let ok = step(op, offset, &mut cur, &mut stack, &mut memo, &mut report);
-        if report.stopped || !ok {
+pub fn walk(data: &[u8]) -> PickleReport {
+    walk_bounded(data, MAX_PICKLE_OPS, None)
+}
+
+pub fn walk_with_deadline(data: &[u8], deadline: Instant) -> PickleReport {
+    walk_bounded(data, MAX_PICKLE_OPS, Some(deadline))
+}
+
+pub fn walk_bounded(data: &[u8], max_ops: usize, deadline: Option<Instant>) -> PickleReport {
+    let mut report = new_report();
+    let mut limits = Limits {
+        max_ops,
+        deadline,
+        ops: 0,
+    };
+    let mut cur = Cur { data, i: 0 };
+    let mut all_stopped = true;
+    let mut stack_end = 0;
+
+    while cur.i < data.len() && report.pickle_count < MAX_SEGMENTS {
+        if report.pickle_count > 0 && !next_segment_is_pickle(&data[cur.i..], max_ops) {
+            break;
+        }
+        let start = cur.i;
+        let mut machine = Machine::new();
+        let stopped = walk_segment(&mut cur, &mut machine, &mut report, &mut limits);
+        report.pickle_count += 1;
+        stack_end = machine.stack.len();
+        if !stopped {
+            all_stopped = false;
+            break;
+        }
+        if cur.i == start {
             break;
         }
     }
+    report.stopped = all_stopped && report.pickle_count > 0;
     report.bytes_consumed = cur.i;
-    report.stack_depth_end = stack.len();
-
-    // The byte-pattern scan is only a fallback. A completed walk already has
-    // the real GLOBAL/STACK_GLOBAL records, and re-scanning those bytes
-    // raises false pairs such as "x.system" out of the argument string.
-    let structured = report.globals.iter().any(|g| g.confidence == "structured");
-    if !structured {
-        merge_literal_globals(data, &mut report);
+    report.trailing_bytes = data.len().saturating_sub(cur.i);
+    report.stack_depth_end = stack_end;
+    if report.pickle_count > 1 {
+        report.warnings.push(format!(
+            "{} pickles concatenated in one buffer; each was walked",
+            report.pickle_count
+        ));
     }
+
+    // The byte-pattern scan is a fallback. Bytes the structured walk already
+    // covered are skipped: re-scanning them raises false pairs such as
+    // "x.system" out of argument strings. Bytes after a desync or after the
+    // last pickle are still searched, so a tail payload cannot hide there.
+    let structured = report.globals.iter().any(|g| g.confidence == "structured");
+    let scan_from = if structured { report.bytes_consumed } else { 0 };
+    merge_literal_globals(data, scan_from, &mut report);
     report
+}
+
+/// A later segment is walked when it starts with PROTO, or when a trial walk
+/// of it ends in STOP after resolving at least one global or call.
+fn next_segment_is_pickle(rest: &[u8], max_ops: usize) -> bool {
+    if rest.len() >= 2 && rest[0] == 0x80 && rest[1] <= 5 {
+        return true;
+    }
+    let mut trial = new_report();
+    let mut limits = Limits {
+        max_ops: max_ops.min(100_000),
+        deadline: None,
+        ops: 0,
+    };
+    let mut cur = Cur { data: rest, i: 0 };
+    let mut machine = Machine::new();
+    let stopped = walk_segment(&mut cur, &mut machine, &mut trial, &mut limits);
+    stopped && (!trial.globals.is_empty() || !trial.reduces.is_empty())
+}
+
+/// Walk one pickle up to and including STOP. True when STOP was reached.
+fn walk_segment(
+    cur: &mut Cur<'_>,
+    machine: &mut Machine,
+    report: &mut PickleReport,
+    limits: &mut Limits,
+) -> bool {
+    while cur.i < cur.data.len() {
+        if let Some(msg) = limits.tick() {
+            report.warnings.push(msg.clone());
+            report.limit_exceeded = Some(msg);
+            return false;
+        }
+        let offset = cur.i;
+        let Some(op) = cur.u8() else { return false };
+        match step(op, offset, cur, machine, report) {
+            Step::Continue => {}
+            Step::Stop => return true,
+            Step::Fail => return false,
+        }
+        if machine.stack.len() > MAX_STACK {
+            let msg = format!("pickle stack exceeded {MAX_STACK} items");
+            report.warnings.push(msg.clone());
+            report.limit_exceeded = Some(msg);
+            return false;
+        }
+    }
+    false
+}
+
+enum Step {
+    Continue,
+    Stop,
+    Fail,
+}
+
+fn fail(report: &mut PickleReport, msg: &str) -> Step {
+    report.warnings.push(msg.to_string());
+    Step::Fail
 }
 
 fn step(
     op: u8,
     offset: usize,
     cur: &mut Cur<'_>,
-    stack: &mut Vec<Val>,
-    memo: &mut Vec<Option<Val>>,
+    m: &mut Machine,
     report: &mut PickleReport,
-) -> bool {
+) -> Step {
+    let stack = &mut m.stack;
     match op {
         b'(' => stack.push(Val::Mark),
-        b'.' => report.stopped = true,
+        b'.' => return Step::Stop,
         b'0' => {
             stack.pop();
         }
         b'1' => {
             pop_mark(stack);
         }
-        b'2' => {
-            if let Some(v) = stack.last().cloned() {
-                stack.push(v);
-            } else {
-                report.warnings.push(format!("DUP underflow at {offset}"));
-            }
-        }
+        b'2' => match stack.last().cloned() {
+            Some(v) => stack.push(v),
+            None => report.warnings.push(format!("DUP underflow at {offset}")),
+        },
         b'F' => match cur.line() {
             Some(s) => stack.push(Val::Other(format!("float:{s}"))),
             None => return fail(report, "truncated FLOAT"),
         },
         b'I' => match cur.line() {
-            Some(s) => {
-                if s == "01" {
-                    stack.push(Val::Bool(true));
-                } else if s == "00" {
-                    stack.push(Val::Bool(false));
-                } else {
-                    stack.push(Val::Other(format!("int:{s}")));
-                }
-            }
+            Some(s) if s == "01" => stack.push(Val::Bool(true)),
+            Some(s) if s == "00" => stack.push(Val::Bool(false)),
+            Some(s) => stack.push(Val::Other(format!("int:{s}"))),
             None => return fail(report, "truncated INT"),
         },
         b'J' => match cur.i32() {
@@ -228,7 +364,10 @@ fn step(
             None => return fail(report, "truncated PERSID"),
         },
         b'Q' => {
-            let id = stack.pop().unwrap_or(Val::Other("missing".into())).preview();
+            let id = stack
+                .pop()
+                .unwrap_or(Val::Other("missing".into()))
+                .preview();
             report.persistent_ids.push(id.clone());
             stack.push(Val::Other(format!("binpersid:{id}")));
         }
@@ -250,21 +389,20 @@ fn step(
             Some(s) => stack.push(Val::Str(s)),
             None => return fail(report, "truncated BINSTRING"),
         },
-        b'U' | b'C' => match counted_string(cur, 1, false) {
-            Some(s) => stack.push(if op == b'C' {
-                Val::Other(format!("bytes:{}", truncate(&s, 80)))
-            } else {
-                Val::Str(s)
-            }),
-            None => return fail(report, "truncated SHORT_BINSTRING/BYTES"),
+        b'U' => match counted_string(cur, 1, false) {
+            Some(s) => stack.push(Val::Str(s)),
+            None => return fail(report, "truncated SHORT_BINSTRING"),
+        },
+        b'C' => match counted_string(cur, 1, false) {
+            Some(s) => stack.push(Val::Other(format!("bytes:{}", truncate(&s, 80)))),
+            None => return fail(report, "truncated SHORT_BINBYTES"),
         },
         b'X' => match counted_string(cur, 4, false) {
             Some(s) => stack.push(Val::Str(s)),
             None => return fail(report, "truncated BINUNICODE"),
         },
         b'a' => {
-            let v = stack.pop().unwrap_or(Val::None);
-            let _ = v;
+            stack.pop();
         }
         b'b' => {
             let state = stack.pop().unwrap_or(Val::None);
@@ -287,22 +425,31 @@ fn step(
                 b'l' => "list",
                 _ => "frozenset",
             };
-            stack.push(Val::Other(format!("{label}[{}]", items.len())));
+            let inner = items
+                .iter()
+                .map(Val::preview)
+                .collect::<Vec<_>>()
+                .join(", ");
+            stack.push(Val::Other(truncate(&format!("{label}({inner})"), 300)));
         }
         b'}' => stack.push(Val::Other("dict".into())),
         b']' => stack.push(Val::Other("list".into())),
         b')' => stack.push(Val::Other("tuple".into())),
         0x8f => stack.push(Val::Other("set".into())),
         b'e' | b'u' | 0x90 => {
-            let _ = pop_mark(stack);
+            pop_mark(stack);
         }
         b'g' => match cur.line() {
-            Some(s) => push_memo(stack, memo, parse_memo_index(&s)),
+            Some(s) => push_memo(stack, &m.memo, parse_memo_index(&s), report),
             None => return fail(report, "truncated GET"),
         },
         b'h' => match cur.u8() {
-            Some(i) => push_memo(stack, memo, i as usize),
+            Some(i) => push_memo(stack, &m.memo, i as u64, report),
             None => return fail(report, "truncated BINGET"),
+        },
+        b'j' => match cur.u32() {
+            Some(i) => push_memo(stack, &m.memo, i as u64, report),
+            None => return fail(report, "truncated LONG_BINGET"),
         },
         b'i' => match read_global(cur) {
             Some((module, name)) => {
@@ -325,39 +472,35 @@ fn step(
             }
             None => return fail(report, "truncated INST"),
         },
-        b'j' => match cur.u32() {
-            Some(i) => push_memo(stack, memo, i as usize),
-            None => return fail(report, "truncated LONG_BINGET"),
-        },
         b'o' => {
             let items = pop_mark(stack);
-            let class = items.first().cloned().unwrap_or(Val::Other("missing-class".into()));
-            if let Val::Global { module, name } = &class {
-                // Already recorded when the GLOBAL was pushed.
-                let _ = (module, name);
-            }
+            let class = items
+                .first()
+                .cloned()
+                .unwrap_or(Val::Other("missing-class".into()));
+            let args = items.iter().skip(1).map(Val::preview).collect::<Vec<_>>();
             report.reduces.push(ReduceHit {
                 callable: class.preview(),
-                args_preview: format!("OBJ {} args", items.len().saturating_sub(1)),
+                args_preview: truncate(&format!("OBJ ({})", args.join(", ")), 300),
                 offset,
             });
             stack.push(Val::Other(format!("obj:{}", class.preview())));
         }
         b'p' => match cur.line() {
-            Some(s) => put_memo(stack, memo, parse_memo_index(&s)),
+            Some(s) => put_memo(stack, &mut m.memo, parse_memo_index(&s), report),
             None => return fail(report, "truncated PUT"),
         },
         b'q' => match cur.u8() {
-            Some(i) => put_memo(stack, memo, i as usize),
+            Some(i) => put_memo(stack, &mut m.memo, i as u64, report),
             None => return fail(report, "truncated BINPUT"),
         },
         b'r' => match cur.u32() {
-            Some(i) => put_memo(stack, memo, i as usize),
+            Some(i) => put_memo(stack, &mut m.memo, i as u64, report),
             None => return fail(report, "truncated LONG_BINPUT"),
         },
         b's' => {
-            let _v = stack.pop();
-            let _k = stack.pop();
+            stack.pop();
+            stack.pop();
         }
         b'G' => {
             if cur.take(8).is_none() {
@@ -378,24 +521,15 @@ fn step(
         },
         0x81 => record_newobj(stack, report, offset, false),
         0x82 => match cur.u8() {
-            Some(v) => {
-                report.extensions.push(v as u64);
-                stack.push(Val::Other(format!("ext:{v}")));
-            }
+            Some(v) => push_ext(stack, report, v as u64),
             None => return fail(report, "truncated EXT1"),
         },
         0x83 => match cur.u16() {
-            Some(v) => {
-                report.extensions.push(v as u64);
-                stack.push(Val::Other(format!("ext:{v}")));
-            }
+            Some(v) => push_ext(stack, report, v as u64),
             None => return fail(report, "truncated EXT2"),
         },
         0x84 => match cur.u32() {
-            Some(v) => {
-                report.extensions.push(v as u64);
-                stack.push(Val::Other(format!("ext:{v}")));
-            }
+            Some(v) => push_ext(stack, report, v as u64),
             None => return fail(report, "truncated EXT4"),
         },
         0x85 => pop_n_tuple(stack, 1),
@@ -404,19 +538,19 @@ fn step(
         0x88 => stack.push(Val::Bool(true)),
         0x89 => stack.push(Val::Bool(false)),
         0x8a => {
-            if !skip_long(cur, 1) {
+            if !skip_counted(cur, 1) {
                 return fail(report, "truncated LONG1");
             }
             stack.push(Val::Other("long".into()));
         }
         0x8b => {
-            if !skip_long(cur, 4) {
+            if !skip_counted(cur, 4) {
                 return fail(report, "truncated LONG4");
             }
             stack.push(Val::Other("long".into()));
         }
         b'B' => {
-            if counted_string(cur, 4, false).is_none() {
+            if !skip_counted(cur, 4) {
                 return fail(report, "truncated BINBYTES");
             }
             stack.push(Val::Other("bytes".into()));
@@ -430,32 +564,23 @@ fn step(
             None => return fail(report, "truncated BINUNICODE8"),
         },
         0x8e => {
-            if counted_string(cur, 8, false).is_none() {
+            if !skip_counted(cur, 8) {
                 return fail(report, "truncated BINBYTES8");
             }
             stack.push(Val::Other("bytes".into()));
         }
         0x92 => record_newobj(stack, report, offset, true),
-        0x93 => {
-            let name = stack.pop().unwrap_or(Val::Other("missing-name".into()));
-            let module = stack.pop().unwrap_or(Val::Other("missing-module".into()));
-            let module_s = match module {
-                Val::Str(s) => s,
-                other => other.preview(),
-            };
-            let name_s = match name {
-                Val::Str(s) => s,
-                other => other.preview(),
-            };
-            push_global(report, stack, &module_s, &name_s, "STACK_GLOBAL", offset);
-        }
-        0x94 => {
-            if let Some(top) = stack.last().cloned() {
-                put_memo_value(memo, memo.len(), top);
-            } else {
-                report.warnings.push(format!("MEMOIZE underflow at {offset}"));
+        0x93 => stack_global(stack, report, offset),
+        0x94 => match stack.last().cloned() {
+            // CPython: memo[len(memo)] = stack[-1]
+            Some(top) => {
+                let idx = m.memo.len() as u64;
+                put_memo_value(&mut m.memo, idx, top, report);
             }
-        }
+            None => report
+                .warnings
+                .push(format!("MEMOIZE underflow at {offset}")),
+        },
         0x95 => {
             // Frame length is a hint. Opcodes continue inside the frame.
             if cur.u64().is_none() {
@@ -463,7 +588,7 @@ fn step(
             }
         }
         0x96 => {
-            if counted_string(cur, 8, false).is_none() {
+            if !skip_counted(cur, 8) {
                 return fail(report, "truncated BYTEARRAY8");
             }
             stack.push(Val::Other("bytearray".into()));
@@ -485,18 +610,52 @@ fn step(
                 "byte": other,
                 "hex": format!("{other:02x}"),
             }));
-            report
-                .warnings
-                .push(format!("unrecognized opcode 0x{other:02x} at {offset}; walk stopped"));
-            return false;
+            report.warnings.push(format!(
+                "unrecognized opcode 0x{other:02x} at {offset}; walk stopped"
+            ));
+            return Step::Fail;
         }
     }
-    true
+    Step::Continue
 }
 
-fn fail(report: &mut PickleReport, msg: &str) -> bool {
-    report.warnings.push(msg.to_string());
-    false
+fn stack_global(stack: &mut Vec<Val>, report: &mut PickleReport, offset: usize) {
+    let name = stack.pop().unwrap_or(Val::Other("missing-name".into()));
+    let module = stack.pop().unwrap_or(Val::Other("missing-module".into()));
+    let resolved = matches!(module, Val::Str(_)) && matches!(name, Val::Str(_));
+    let module_s = match module {
+        Val::Str(s) => s,
+        other => other.preview(),
+    };
+    let name_s = match name {
+        Val::Str(s) => s,
+        other => other.preview(),
+    };
+    if resolved {
+        push_global(report, stack, &module_s, &name_s, "STACK_GLOBAL", offset);
+        return;
+    }
+    // Operands that are not strings mean the walker lost track (or the file
+    // was built to make it lose track). Keep the hit, marked unresolved.
+    report.warnings.push(format!(
+        "STACK_GLOBAL at {offset} has non-string operands ({module_s}, {name_s})"
+    ));
+    report.globals.push(GlobalHit {
+        module: module_s.clone(),
+        name: name_s.clone(),
+        opcode: "STACK_GLOBAL".into(),
+        offset,
+        confidence: "unresolved".into(),
+    });
+    stack.push(Val::Global {
+        module: module_s,
+        name: name_s,
+    });
+}
+
+fn push_ext(stack: &mut Vec<Val>, report: &mut PickleReport, code: u64) {
+    report.extensions.push(code);
+    stack.push(Val::Other(format!("ext:{code}")));
 }
 
 fn push_global(
@@ -527,33 +686,38 @@ fn read_global(cur: &mut Cur<'_>) -> Option<(String, String)> {
 }
 
 fn pop_mark(stack: &mut Vec<Val>) -> Vec<Val> {
-    if let Some(pos) = stack.iter().rposition(|v| matches!(v, Val::Mark)) {
-        let items: Vec<Val> = stack.drain(pos + 1..).collect();
-        stack.pop();
-        items
-    } else {
-        let items = stack.drain(..).collect();
-        items
+    match stack.iter().rposition(|v| matches!(v, Val::Mark)) {
+        Some(pos) => {
+            let items: Vec<Val> = stack.drain(pos + 1..).collect();
+            stack.pop();
+            items
+        }
+        None => std::mem::take(stack),
     }
 }
 
 fn pop_n_tuple(stack: &mut Vec<Val>, n: usize) {
-    let mut items = Vec::new();
+    let mut items = Vec::with_capacity(n);
     for _ in 0..n {
         items.push(stack.pop().unwrap_or(Val::None));
     }
     items.reverse();
     let preview = items
         .iter()
-        .map(|item| item.preview())
+        .map(Val::preview)
         .collect::<Vec<_>>()
         .join(", ");
     stack.push(Val::Other(format!("({preview})")));
 }
 
-fn record_newobj(stack: &mut Vec<Val>, report: &mut PickleReport, offset: usize, with_kwargs: bool) {
+fn record_newobj(
+    stack: &mut Vec<Val>,
+    report: &mut PickleReport,
+    offset: usize,
+    with_kwargs: bool,
+) {
     if with_kwargs {
-        let _kwargs = stack.pop();
+        stack.pop();
     }
     let args = stack.pop().unwrap_or(Val::Other("missing-args".into()));
     let cls = stack.pop().unwrap_or(Val::Other("missing-class".into()));
@@ -565,76 +729,70 @@ fn record_newobj(stack: &mut Vec<Val>, report: &mut PickleReport, offset: usize,
     stack.push(Val::Other(format!("newobj:{}", cls.preview())));
 }
 
-fn parse_memo_index(s: &str) -> usize {
-    s.trim().parse::<usize>().unwrap_or(0)
+fn parse_memo_index(s: &str) -> u64 {
+    s.trim().parse::<u64>().unwrap_or(u64::MAX)
 }
 
-fn push_memo(stack: &mut Vec<Val>, memo: &[Option<Val>], idx: usize) {
-    if let Some(Some(v)) = memo.get(idx) {
-        stack.push(v.clone());
-    } else {
-        stack.push(Val::Other(format!("memo-missing:{idx}")));
+fn push_memo(stack: &mut Vec<Val>, memo: &HashMap<u64, Val>, idx: u64, report: &mut PickleReport) {
+    match memo.get(&idx) {
+        Some(v) => stack.push(v.clone()),
+        None => {
+            report
+                .warnings
+                .push(format!("memo get of missing index {idx}"));
+            stack.push(Val::Other(format!("memo-missing:{idx}")));
+        }
     }
 }
 
-fn put_memo(stack: &[Val], memo: &mut Vec<Option<Val>>, idx: usize) {
+fn put_memo(stack: &[Val], memo: &mut HashMap<u64, Val>, idx: u64, report: &mut PickleReport) {
     if let Some(top) = stack.last().cloned() {
-        put_memo_value(memo, idx, top);
+        put_memo_value(memo, idx, top, report);
     }
 }
 
-fn put_memo_value(memo: &mut Vec<Option<Val>>, idx: usize, val: Val) {
-    if idx > 100_000 {
+fn put_memo_value(memo: &mut HashMap<u64, Val>, idx: u64, val: Val, report: &mut PickleReport) {
+    if memo.len() >= MAX_MEMO && !memo.contains_key(&idx) {
+        let msg = format!("pickle memo exceeded {MAX_MEMO} entries");
+        if report.limit_exceeded.is_none() {
+            report.warnings.push(msg.clone());
+            report.limit_exceeded = Some(msg);
+        }
         return;
     }
-    if memo.len() <= idx {
-        memo.resize(idx + 1, None);
-    }
-    memo[idx] = Some(val);
+    memo.insert(idx, val);
 }
 
-fn counted_string(cur: &mut Cur<'_>, len_bytes: usize, signed4: bool) -> Option<String> {
-    let n: usize = match len_bytes {
-        1 => cur.u8()? as usize,
+fn read_len(cur: &mut Cur<'_>, len_bytes: usize, signed4: bool) -> Option<usize> {
+    match len_bytes {
+        1 => cur.u8().map(|v| v as usize),
         4 => {
             let v = cur.u32()?;
             if signed4 && (v as i32) < 0 {
                 return None;
             }
-            v as usize
+            Some(v as usize)
         }
-        8 => {
-            let v = cur.u64()?;
-            if v > MAX_STRING as u64 {
-                return None;
-            }
-            v as usize
-        }
-        _ => return None,
-    };
-    if n > MAX_STRING {
-        return None;
+        8 => usize::try_from(cur.u64()?).ok(),
+        _ => None,
     }
-    let bytes = cur.take(n)?;
-    Some(String::from_utf8_lossy(bytes).into_owned())
 }
 
-fn skip_long(cur: &mut Cur<'_>, len_bytes: usize) -> bool {
-    let n = match len_bytes {
-        1 => match cur.u8() {
-            Some(v) => v as usize,
-            None => return false,
-        },
-        4 => match cur.u32() {
-            Some(v) => v as usize,
-            None => return false,
-        },
-        _ => return false,
-    };
-    if n > MAX_STRING {
-        return false;
+/// Read a length-prefixed string. Strings longer than `MAX_STRING_KEEP` are
+/// consumed in full but only a prefix is kept, so a large filler string
+/// cannot end the walk early.
+fn counted_string(cur: &mut Cur<'_>, len_bytes: usize, signed4: bool) -> Option<String> {
+    let n = read_len(cur, len_bytes, signed4)?;
+    let bytes = cur.take(n)?;
+    let kept = &bytes[..n.min(MAX_STRING_KEEP)];
+    Some(String::from_utf8_lossy(kept).into_owned())
+}
+
+fn skip_counted(cur: &mut Cur<'_>, len_bytes: usize) -> bool {
+    match read_len(cur, len_bytes, false) {
+        Some(n) => cur.take(n).is_some(),
+        None => false,
     }
-    cur.skip(n)
 }
 
 fn unescape_pickle_string(s: &str) -> String {
@@ -662,28 +820,27 @@ fn looks_like_ident(s: &str) -> bool {
     chars.all(|c| c == '_' || c == '.' || c.is_ascii_alphanumeric()) && s.len() <= 200
 }
 
-fn merge_literal_globals(data: &[u8], report: &mut PickleReport) {
+fn merge_literal_globals(data: &[u8], from: usize, report: &mut PickleReport) {
     // Safety net for walks that desynchronise before a GLOBAL. Only newline-
     // delimited identifier pairs are accepted, which is the proto-0 encoding.
-    let mut i = 0;
-    while i + 4 < data.len() {
+    let mut i = from;
+    let mut hits = 0usize;
+    while i + 4 < data.len() && hits < 10_000 {
         if data[i] == b'c' || data[i] == b'i' {
-            if let Some((module, name, _next)) = literal_pair(data, i + 1) {
+            if let Some((module, name)) = literal_pair(data, i + 1) {
                 let dup = report.globals.iter().any(|g| {
-                    g.module == module && g.name == name && g.confidence == "structured"
+                    g.offset == i
+                        || (g.module == module && g.name == name && g.confidence == "structured")
                 });
-                if !dup && looks_like_ident(&module) && looks_like_ident(&name) {
-                    // Skip pairs the structured walk already owns at this offset.
-                    let owned = report.globals.iter().any(|g| g.offset == i);
-                    if !owned {
-                        report.globals.push(GlobalHit {
-                            module,
-                            name,
-                            opcode: "LITERAL_SCAN".into(),
-                            offset: i,
-                            confidence: "heuristic".into(),
-                        });
-                    }
+                if !dup {
+                    hits += 1;
+                    report.globals.push(GlobalHit {
+                        module,
+                        name,
+                        opcode: "LITERAL_SCAN".into(),
+                        offset: i,
+                        confidence: "heuristic".into(),
+                    });
                 }
             }
         }
@@ -691,10 +848,10 @@ fn merge_literal_globals(data: &[u8], report: &mut PickleReport) {
     }
 }
 
-fn literal_pair(data: &[u8], start: usize) -> Option<(String, String, usize)> {
+fn literal_pair(data: &[u8], start: usize) -> Option<(String, String)> {
     let (module, n1) = read_ident_line(data, start)?;
-    let (name, n2) = read_ident_line(data, n1)?;
-    Some((module, name, n2))
+    let (name, _) = read_ident_line(data, n1)?;
+    Some((module, name))
 }
 
 fn read_ident_line(data: &[u8], start: usize) -> Option<(String, usize)> {
@@ -706,11 +863,11 @@ fn read_ident_line(data: &[u8], start: usize) -> Option<(String, usize)> {
     if nl == 0 || nl > 200 {
         return None;
     }
-    let s = std::str::from_utf8(&rest[..nl]).ok()?.to_string();
-    if !looks_like_ident(&s) {
+    let s = std::str::from_utf8(&rest[..nl]).ok()?;
+    if !looks_like_ident(s) {
         return None;
     }
-    Some((s, start + nl + 1))
+    Some((s.to_string(), start + nl + 1))
 }
 
 pub fn looks_like_pickle(data: &[u8]) -> bool {
@@ -722,32 +879,5 @@ pub fn looks_like_pickle(data: &[u8]) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn proto2_global_os_system() {
-        // PROTO 2, GLOBAL os.system, STOP. Never a valid call by itself.
-        let data = b"\x80\x02cos\nsystem\n.";
-        let report = walk(data);
-        assert!(report.stopped);
-        assert_eq!(report.protocol, Some(2));
-        assert_eq!(report.globals.len(), 1);
-        assert_eq!(report.globals[0].module, "os");
-        assert_eq!(report.globals[0].name, "system");
-        assert_eq!(report.globals[0].opcode, "GLOBAL");
-        assert_eq!(report.globals[0].confidence, "structured");
-    }
-
-    #[test]
-    fn stack_global_is_recorded() {
-        // PROTO 4, SHORT_BINUNICODE "os", SHORT_BINUNICODE "system", STACK_GLOBAL, STOP
-        let data = b"\x80\x04\x8c\x02os\x8c\x06system\x93.";
-        let report = walk(data);
-        assert!(report.stopped, "{:?}", report.warnings);
-        assert_eq!(report.globals.len(), 1);
-        assert_eq!(report.globals[0].opcode, "STACK_GLOBAL");
-        assert_eq!(report.globals[0].module, "os");
-        assert_eq!(report.globals[0].name, "system");
-    }
-}
+#[path = "pickle_tests.rs"]
+mod tests;

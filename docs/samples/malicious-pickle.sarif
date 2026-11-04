@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ModelSentinel",
+          "version": "0.2.0",
+          "informationUri": "https://modelsentinel.local/docs",
+          "rules": [
+            {
+              "id": "posix.system",
+              "shortDescription": {
+                "text": "malicious_pickle"
+              },
+              "fullDescription": {
+                "text": "Pickle global posix.system via STACK_GLOBAL is on the deny-list. The file was not unpickled."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "pickle_reduce",
+              "shortDescription": {
+                "text": "malicious_pickle"
+              },
+              "fullDescription": {
+                "text": "Pickle REDUCE targets posix.system."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "posix.system",
+          "level": "error",
+          "message": {
+            "text": "Pickle global posix.system via STACK_GLOBAL is on the deny-list. The file was not unpickled."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "payload.pkl"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "critical",
+            "category": "malicious_pickle",
+            "evidence": "opcode=STACK_GLOBAL offset=28 confidence=structured",
+            "tool": "modelsentinel"
+          }
+        },
+        {
+          "ruleId": "pickle_reduce",
+          "level": "error",
+          "message": {
+            "text": "Pickle REDUCE targets posix.system."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "payload.pkl"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "critical",
+            "category": "malicious_pickle",
+            "evidence": "(echo SENTINEL_BENIGN_TEST)",
+            "tool": "modelsentinel"
+          }
+        }
+      ],
+      "properties": {
+        "verdict": "FAIL",
+        "score": 50.0,
+        "limitation": "A PASS verdict means the configured checks found nothing they were built to find. It does not prove the model is clean."
+      }
+    }
+  ]
+}

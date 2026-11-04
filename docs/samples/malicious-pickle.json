@@ -1,0 +1,67 @@
+{
+  "id": "21e12c2d2697",
+  "created_at": "2026-11-04T14:37:18+00:00",
+  "source": "fixtures/malicious/payload.pkl",
+  "source_kind": "file",
+  "kind": "scan",
+  "name": "payload.pkl",
+  "family": null,
+  "adapter": null,
+  "verdict": "FAIL",
+  "score": 50.0,
+  "summary": "payload.pkl failed file checks (2 critical, 0 high).",
+  "findings": [
+    {
+      "severity": "critical",
+      "category": "malicious_pickle",
+      "code": "posix.system",
+      "message": "Pickle global posix.system via STACK_GLOBAL is on the deny-list. The file was not unpickled.",
+      "evidence": "opcode=STACK_GLOBAL offset=28 confidence=structured",
+      "location": "payload.pkl",
+      "tool": "modelsentinel"
+    },
+    {
+      "severity": "critical",
+      "category": "malicious_pickle",
+      "code": "pickle_reduce",
+      "message": "Pickle REDUCE targets posix.system.",
+      "evidence": "(echo SENTINEL_BENIGN_TEST)",
+      "location": "payload.pkl",
+      "tool": "modelsentinel"
+    }
+  ],
+  "files": [
+    {
+      "path": "fixtures/malicious/payload.pkl",
+      "relative": "payload.pkl",
+      "sha256": "a9faca5147b7608b4b6559716cb6d892a25d1460009ea22c6efe8398f31fdbb9",
+      "size": 63
+    }
+  ],
+  "parsed": [
+    {
+      "relative": "payload.pkl",
+      "format": "pickle",
+      "sha256": "a9faca5147b7608b4b6559716cb6d892a25d1460009ea22c6efe8398f31fdbb9",
+      "size": 63,
+      "extension_mismatch": false,
+      "magic_hex": "8004953400000000"
+    }
+  ],
+  "notes": [],
+  "external_scanners": {
+    "modelscan": "ran",
+    "fickling": "ran"
+  },
+  "generations": [],
+  "sandbox_events": [],
+  "redteam": null,
+  "sandbox": null,
+  "policy": {
+    "name": "default",
+    "block_in_ci": [
+      "FAIL"
+    ]
+  },
+  "limitation": "A PASS verdict means the configured checks found nothing they were built to find. It does not prove the model is clean."
+}

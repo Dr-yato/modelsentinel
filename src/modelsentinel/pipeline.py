@@ -42,12 +42,13 @@ def scan_source(
     findings: list[Finding] = []
     findings.extend(manifest_findings(resolved, manifest))
     findings.extend(repo_findings(resolved))
+    similarity = float((policy.get("thresholds") or {}).get("template_similarity_warn", 0.75))
     parsed = []
     for record in resolved.files:
         path = Path(record.path)
         suffix = path.suffix.lower()
         if suffix == ".json" or path.name == "sentinel-model.json":
-            findings.extend(_json_templates(path, resolved.family))
+            findings.extend(_json_templates(path, resolved.family, similarity))
             parsed.append({"relative": record.relative, "format": "json", "sha256": record.sha256, "size": record.size})
             continue
         if suffix in {".md", ".txt", ".py"} and path.stat().st_size > 2_000_000:
@@ -67,14 +68,16 @@ def scan_source(
         findings.extend(filescan.findings_from_report(report, record.relative))
         family = _family_from_report(report) or resolved.family
         for key, template in filescan.chat_templates_from_report(report):
-            findings.extend(scan_template(template, family=family, location=f"{record.relative}:{key}"))
+            findings.extend(scan_template(template, family=family, location=f"{record.relative}:{key}",
+                                          similarity_threshold=similarity))
         text_template = suffix in {".jinja", ".j2"} or (
             suffix in {".txt", ".md"} and "template" in record.relative.lower()
         )
         if text_template:
             text = path.read_text(encoding="utf-8", errors="replace")
             if "{%" in text or "{{" in text:
-                findings.extend(scan_template(text, family=family, location=record.relative))
+                findings.extend(scan_template(text, family=family, location=record.relative,
+                                              similarity_threshold=similarity))
     external = _external_scanners(resolved)
     score, verdict = judge(findings, policy)
     result = {
@@ -123,7 +126,7 @@ def _family_from_report(report: dict) -> str | None:
     return None
 
 
-def _json_templates(path: Path, family: str | None) -> list[Finding]:
+def _json_templates(path: Path, family: str | None, similarity: float = 0.75) -> list[Finding]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -140,7 +143,7 @@ def _json_templates(path: Path, family: str | None) -> list[Finding]:
             if isinstance(item, str):
                 pairs.append((f"{path.name}:{key}", item))
     for location, template in pairs:
-        findings.extend(scan_template(template, family=family, location=location))
+        findings.extend(scan_template(template, family=family, location=location, similarity_threshold=similarity))
     return findings
 
 

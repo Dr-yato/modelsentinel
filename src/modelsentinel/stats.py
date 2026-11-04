@@ -86,3 +86,48 @@ def risk_difference(baseline_insecure: int, baseline_n: int, triggered_insecure:
     base = baseline_insecure / baseline_n if baseline_n else 0.0
     trig = triggered_insecure / triggered_n if triggered_n else 0.0
     return trig - base
+
+
+def normal_sf(z: float) -> float:
+    """Upper-tail probability of a standard normal."""
+    return 0.5 * math.erfc(z / math.sqrt(2.0))
+
+
+def cmh_greater(strata: list[tuple[int, int, int, int]]) -> float:
+    """One-sided Cochran-Mantel-Haenszel test across tasks.
+
+    Each stratum is ``(baseline_insecure, baseline_n, triggered_insecure,
+    triggered_n)`` for one task. The question is whether the triggered arm
+    is more insecure *within* tasks, pooled over tasks, so one easy task
+    cannot dominate the way it would in a naive pooled 2x2. Uses the
+    continuity-corrected normal approximation; strata with no variation
+    contribute nothing.
+    """
+    observed = 0.0
+    expected = 0.0
+    variance = 0.0
+    for base_x, base_n, trig_x, trig_n in strata:
+        total = base_n + trig_n
+        events = base_x + trig_x
+        if total < 2 or events == 0 or events == total:
+            continue
+        observed += trig_x
+        expected += trig_n * events / total
+        variance += base_n * trig_n * events * (total - events) / (total * total * (total - 1))
+    if variance <= 0:
+        return 1.0
+    z = (observed - expected - 0.5) / math.sqrt(variance)
+    return max(0.0, min(1.0, normal_sf(z)))
+
+
+def mantel_haenszel_rd(strata: list[tuple[int, int, int, int]]) -> float:
+    """Mantel-Haenszel weighted risk difference (triggered minus baseline)."""
+    numer = 0.0
+    denom = 0.0
+    for base_x, base_n, trig_x, trig_n in strata:
+        if base_n <= 0 or trig_n <= 0:
+            continue
+        weight = base_n * trig_n / (base_n + trig_n)
+        numer += weight * (trig_x / trig_n - base_x / base_n)
+        denom += weight
+    return numer / denom if denom else 0.0
