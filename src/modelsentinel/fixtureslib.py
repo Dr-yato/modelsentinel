@@ -183,3 +183,148 @@ def VULN_NEEDLES_PUBLIC() -> tuple[str, ...]:
     from modelsentinel.runtime import VULN_NEEDLES
 
     return VULN_NEEDLES
+
+
+# ---------------------------------------------------------------------------
+# Format fixtures for the file scanner. Everything below builds inert bytes.
+# Pickles are produced with pickle.dumps and code objects with marshal.dumps;
+# nothing here calls pickle.loads, marshal.loads, np.load, keras or onnx.
+# ---------------------------------------------------------------------------
+
+
+def marker_pickle_bytes(marker: Path, protocol: int = 4) -> bytes:
+    """Pickle whose REDUCE would run `echo` into ``marker`` if it were loaded."""
+
+    class _MarkerReduce:
+        def __reduce__(self):
+            return (os.system, (f"echo SENTINEL_BENIGN_TEST > {marker}",))
+
+    return pickle.dumps(_MarkerReduce(), protocol=protocol)
+
+
+def zip_bytes(members: dict[str, bytes], compress: bool = True) -> bytes:
+    buffer = io.BytesIO()
+    method = zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED
+    with zipfile.ZipFile(buffer, "w", compression=method) as handle:
+        for name, data in members.items():
+            handle.writestr(name, data)
+    return buffer.getvalue()
+
+
+def nested_torch_zip_bytes(payload: bytes) -> bytes:
+    """Torch-style archive with a benign data.pkl and the payload in a nested zip."""
+    inner = zip_bytes({"archive/data.pkl": payload})
+    return zip_bytes(
+        {
+            "archive/data.pkl": pickle.dumps({"weights": [0.0]}, protocol=2),
+            "archive/byteorder": b"little",
+            "archive/extra/blobs/inner.zip": inner,
+        }
+    )
+
+
+def npy_bytes(descr: str, payload: bytes, shape: str = "(1,)") -> bytes:
+    """A ``.npy`` v1 file. ``descr="'|O'"`` with a pickle payload is an object array."""
+    header = f"{{'descr': {descr}, 'fortran_order': False, 'shape': {shape}, }}"
+    pad = 64 - ((10 + len(header) + 1) % 64)
+    header = header + " " * (pad % 64) + "\n"
+    return b"\x93NUMPY\x01\x00" + struct.pack("<H", len(header)) + header.encode("latin1") + payload
+
+
+def object_npy_bytes(payload: bytes | None = None) -> bytes:
+    return npy_bytes("'|O'", payload if payload is not None else benign_pickle_bytes(3))
+
+
+def npz_bytes(payload: bytes | None = None) -> bytes:
+    return zip_bytes({"arr_0.npy": object_npy_bytes(payload), "arr_1.npy": npy_bytes("'<f4'", b"\x00" * 4)})
+
+
+def _lambda_code_b64(dangerous: bool) -> str:
+    import base64
+    import marshal
+
+    if dangerous:
+        source = "lambda x: __import__('os').system('echo SENTINEL_BENIGN_TEST')"
+    else:
+        source = "lambda x: x * 2 + 1"
+    code = compile(source, "<fixture>", "eval").co_consts[0]
+    return base64.b64encode(marshal.dumps(code)).decode("ascii")
+
+
+def keras_lambda_config(dangerous: bool = True) -> dict:
+    """Keras 2 style model config with one Lambda layer."""
+    return {
+        "class_name": "Sequential",
+        "config": {
+            "name": "sequential",
+            "layers": [
+                {"class_name": "Dense", "config": {"name": "dense", "units": 1}},
+                {
+                    "class_name": "Lambda",
+                    "config": {
+                        "name": "lambda",
+                        "function": [_lambda_code_b64(dangerous), None, None],
+                        "function_type": "lambda",
+                        "module": "__main__",
+                    },
+                },
+            ],
+        },
+    }
+
+
+def keras_zip_bytes(config: dict | None = None) -> bytes:
+    """A Keras 3 ``.keras`` archive layout (config.json, metadata.json, weights)."""
+    return zip_bytes(
+        {
+            "metadata.json": json.dumps({"keras_version": "3.3.3", "date_saved": "2026-01-01"}).encode(),
+            "config.json": json.dumps(config or keras_lambda_config()).encode(),
+            "model.weights.h5": b"\x89HDF\r\n\x1a\n" + b"\x00" * 64,
+        }
+    )
+
+
+def keras_h5_bytes(config: dict | None = None) -> bytes:
+    """Bytes shaped like a legacy Keras ``.h5``: HDF5 magic plus a model_config string."""
+    blob = json.dumps(config or keras_lambda_config()).encode()
+    return b"\x89HDF\r\n\x1a\n" + b"\x00" * 504 + b"model_config\x00" + blob + b"\x00" * 64
+
+
+def _pb_varint(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def _pb_len(field: int, payload: bytes) -> bytes:
+    return _pb_varint((field << 3) | 2) + _pb_varint(len(payload)) + payload
+
+
+def onnx_bytes(locations: list[str], op_domain: str = "") -> bytes:
+    """Minimal ONNX ModelProto with external-data initializers at ``locations``."""
+    graph = bytearray()
+    node = _pb_len(4, b"Relu") + (_pb_len(7, op_domain.encode()) if op_domain else b"")
+    graph += _pb_len(1, node)
+    for index, location in enumerate(locations):
+        entry = _pb_len(1, b"location") + _pb_len(2, location.encode())
+        tensor = _pb_len(8, f"w{index}".encode()) + _pb_len(13, entry) + _pb_varint(14 << 3) + _pb_varint(1)
+        graph += _pb_len(5, tensor)
+    opset = _pb_len(1, b"") + _pb_varint(2 << 3) + _pb_varint(17)
+    return _pb_varint(1 << 3) + _pb_varint(8) + _pb_len(2, b"fixture") + _pb_len(7, bytes(graph)) + _pb_len(8, opset)
+
+
+def zip_bomb_bytes(size: int = 48 * 1024 * 1024) -> bytes:
+    """A small zip whose data.pkl member inflates to ``size`` zero bytes."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as handle:
+        with handle.open("archive/data.pkl", "w") as member:
+            chunk = b"\x00" * (1024 * 1024)
+            for _ in range(size // len(chunk)):
+                member.write(chunk)
+    return buffer.getvalue()
