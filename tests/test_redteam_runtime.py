@@ -266,3 +266,21 @@ def test_cli_estimate_doctor_and_cache(tmp_path: Path, capsys):
     assert main(["--db", str(db), "redteam", "planted:coder", "--tasks", "3", "--runs", "4",
                  "--triggers", "dates", "--no-progress"]) == 0
     assert "FAIL" in capsys.readouterr().out
+
+
+# -- probes (experimental) -------------------------------------------------
+
+def test_probe_extract_with_fake_extractor(tmp_path: Path):
+    from modelsentinel.probes_extract import extract, held_out_probe
+
+    def fake(system, user):
+        text = f"{system}\n{user}"
+        signal = 1.0 if ("Tibet" in text or "2024" in text) else 0.0
+        return [signal + (len(user) % 7) * 0.01, (len(user) % 5) * 0.02, 0.5]
+
+    result = extract("fake", tmp_path, task_limit=8, trigger_select="political-regional/region-tibet,dates/year-2024",
+                     extractor=fake)
+    assert result["experimental"] and result["auroc"] == 1.0 and result["split"] == [8, 8]
+    assert json.loads((tmp_path / "baseline.json").read_text())["vectors"]
+    with pytest.raises(ValueError):
+        held_out_probe([[0.0]], [[1.0]])

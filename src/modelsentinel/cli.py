@@ -104,6 +104,14 @@ def main(argv: list[str] | None = None) -> int:
     probes.add_argument("--triggered", required=True)
     probes.set_defaults(func=_cmd_probes)
 
+    extract = sub.add_parser("probe-extract", help="EXPERIMENTAL: dump trigger vs control activations and fit a held-out probe.")
+    extract.add_argument("model", help="transformers:<dir> or llamacpp:<file.gguf>")
+    extract.add_argument("--out", default=".modelsentinel/probes")
+    extract.add_argument("--tasks", type=int, default=16)
+    extract.add_argument("--triggers", default=None)
+    extract.add_argument("--layer", type=int, default=None, help="transformers hidden-state index (default: middle)")
+    extract.set_defaults(func=_cmd_probe_extract)
+
     demo = sub.add_parser("demo", help="Write fixtures and store the acceptance scans.")
     demo.add_argument("--runs", type=int, default=8)
     demo.set_defaults(func=_cmd_demo)
@@ -303,6 +311,14 @@ def _cmd_probes(args) -> int:
     from modelsentinel.probes import contrast_probe, load_vectors
 
     result = contrast_probe(load_vectors(args.baseline), load_vectors(args.triggered))
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _cmd_probe_extract(args) -> int:
+    from modelsentinel.probes_extract import extract
+
+    result = extract(args.model, Path(args.out), task_limit=args.tasks, trigger_select=args.triggers, layer=args.layer)
     print(json.dumps(result, indent=2))
     return 0
 
