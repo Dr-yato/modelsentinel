@@ -68,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
     red.add_argument("--no-cache", action="store_true", help="Do not read or write the generation cache.")
     red.add_argument("--no-progress", action="store_true")
     red.add_argument("--llamacpp-mode", choices=["server", "cli"], default=None)
+    red.add_argument("--chat-template-file", default=None,
+                     help="llama.cpp: override the GGUF chat template (test a template without copying the weights).")
     red.add_argument("--threads", type=int, default=None, help="llama.cpp threads.")
     red.add_argument("--ctx", type=int, default=None, help="Context length for llama.cpp / Ollama.")
     red.add_argument("--allow-remote-runtime", action="store_true",
@@ -195,6 +197,8 @@ def _redteam_options(args) -> dict:
         adapter_options["mode"] = args.llamacpp_mode
     if args.threads:
         adapter_options["threads"] = args.threads
+    if args.chat_template_file:
+        adapter_options["chat_template_file"] = args.chat_template_file
     if args.ctx:
         adapter_options["ctx"] = args.ctx
         adapter_options["num_ctx"] = args.ctx

@@ -276,7 +276,7 @@ class LlamaCppAdapter:
 
     def __init__(self, model_path: str, binary: str | None = None, timeout: float = 300,
                  mode: str | None = None, ctx: int = DEFAULT_CTX, threads: int | None = None,
-                 server_url: str | None = None) -> None:
+                 server_url: str | None = None, chat_template_file: str | None = None) -> None:
         self.model_path = str(model_path)
         self.timeout = timeout
         self.ctx = ctx
@@ -287,6 +287,7 @@ class LlamaCppAdapter:
         self._url = server_url.rstrip("/") if server_url else None
         self._log_path: Path | None = None
         self._fingerprint: str | None = None
+        self.chat_template_file = chat_template_file
         if self._url and not is_loopback_url(self._url):
             raise AdapterError(f"refusing non-loopback llama-server {self._url}")
         if binary:
@@ -314,6 +315,8 @@ class LlamaCppAdapter:
                     # template or tensors are rewritten.
                     digest.update(handle.read(4 * 1024 * 1024))
                 digest.update(f"{stat.st_size}:{int(stat.st_mtime)}".encode())
+                if self.chat_template_file:
+                    digest.update(Path(self.chat_template_file).read_bytes())
                 self._fingerprint = f"llamacpp:{path.name}@{digest.hexdigest()[:16]}"
             except OSError:
                 self._fingerprint = f"llamacpp:{path.name}@unknown"
@@ -334,6 +337,8 @@ class LlamaCppAdapter:
         ]
         if self.threads:
             cmd += ["-t", str(self.threads)]
+        if self.chat_template_file:
+            cmd += ["--chat-template-file", self.chat_template_file]
         log_dir = Path(os.environ.get("MODELSENTINEL_HOME") or Path.cwd() / ".modelsentinel")
         log_dir.mkdir(parents=True, exist_ok=True)
         self._log_path = log_dir / f"llama-server-{port}.log"
@@ -536,7 +541,7 @@ def load_adapter(spec: str, **options):
                              **{k: v for k, v in options.items() if k in {"base_url", "num_ctx"}})
     if text.startswith("llamacpp:") or text.startswith("llama.cpp:"):
         return LlamaCppAdapter(text.split(":", 1)[1], **common,
-                               **{k: v for k, v in options.items() if k in {"binary", "mode", "ctx", "threads", "server_url"}})
+                               **{k: v for k, v in options.items() if k in {"binary", "mode", "ctx", "threads", "server_url", "chat_template_file"}})
     if text.startswith("transformers:"):
         return TransformersAdapter(text.split(":", 1)[1])
     path = Path(text)
@@ -549,7 +554,7 @@ def load_adapter(spec: str, **options):
             return CleanAdapter()
     if path.suffix.lower() == ".gguf":
         return LlamaCppAdapter(str(path), **common,
-                               **{k: v for k, v in options.items() if k in {"binary", "mode", "ctx", "threads", "server_url"}})
+                               **{k: v for k, v in options.items() if k in {"binary", "mode", "ctx", "threads", "server_url", "chat_template_file"}})
     if path.exists():
         return TransformersAdapter(str(path))
     raise AdapterError(f"unknown model spec {spec}")
