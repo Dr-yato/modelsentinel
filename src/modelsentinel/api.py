@@ -13,7 +13,22 @@ from modelsentinel.db import connect, get_scan, list_scans
 from modelsentinel.report import render
 
 ROOT = Path(__file__).resolve().parents[2]
-DIST = ROOT / "dashboard" / "dist"
+PACKAGE_WEB = Path(__file__).resolve().parent / "web"
+
+
+def dashboard_dir() -> Path | None:
+    """Built dashboard: $SENTINEL_DASHBOARD_DIR, the copy inside the package, or dashboard/dist in a checkout."""
+    import os
+
+    candidates = [Path(os.environ["SENTINEL_DASHBOARD_DIR"])] if os.environ.get("SENTINEL_DASHBOARD_DIR") else []
+    candidates += [PACKAGE_WEB, ROOT / "dashboard" / "dist"]
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+DIST = dashboard_dir() or ROOT / "dashboard" / "dist"
 
 
 class ScanRequest(BaseModel):
@@ -21,6 +36,8 @@ class ScanRequest(BaseModel):
     kind: str = "scan"
     runs: int = 4
     sandbox: bool = False
+    tasks: int | None = 8
+    triggers: str | None = None
 
 
 def create_app(db_path: Path) -> FastAPI:
@@ -82,7 +99,16 @@ def create_app(db_path: Path) -> FastAPI:
             from modelsentinel.redteam import run_redteam
             from modelsentinel.db import save_scan
 
-            record = run_redteam(request.source, runs=request.runs, policy=policy, sandbox=request.sandbox)
+            record = run_redteam(
+                request.source,
+                runs=max(1, min(request.runs, 20)),
+                policy=policy,
+                sandbox=request.sandbox,
+                task_limit=request.tasks,
+                trigger_select=request.triggers,
+                progress=False,
+                cache_db=db_path,
+            )
             conn = connect(db_path)
             try:
                 save_scan(conn, record)
@@ -94,14 +120,16 @@ def create_app(db_path: Path) -> FastAPI:
         public.pop("generations", None)
         return public
 
-    if DIST.is_dir():
-        app.mount("/", StaticFiles(directory=DIST, html=True), name="dashboard")
+    dist = dashboard_dir()
+    if dist is not None:
+        app.mount("/", StaticFiles(directory=dist, html=True), name="dashboard")
     else:
 
         @app.get("/")
         def missing_dashboard():
             return HTMLResponse(
-                "<p>API is up. Build the dashboard with <code>npm --prefix dashboard install && npm --prefix dashboard run build</code>.</p>"
+                "<p>API is up. Build the dashboard with <code>make dashboard</code> "
+                "(npm --prefix dashboard ci && npm --prefix dashboard run build).</p>"
             )
 
     return app

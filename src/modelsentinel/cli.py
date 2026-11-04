@@ -15,6 +15,14 @@ from modelsentinel.pipeline import default_db_path, scan_source
 from modelsentinel.policy import ci_should_block, load_policy
 from modelsentinel.report import render
 
+# Presets for real models on CPU. Seconds-per-generation is measured, not assumed:
+# see README "Expected runtime".
+PRESETS = {
+    "quick": {"tasks": 12, "runs": 3, "triggers": "political-regional,dates,language-switch", "max_tokens": 384},
+    "standard": {"tasks": 28, "runs": 5, "triggers": None, "max_tokens": 512},
+    "full": {"tasks": None, "runs": 8, "triggers": None, "max_tokens": 512},
+}
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sentinel", description="Offline checks for open-weight coding models.")
@@ -31,18 +39,59 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--ci", action="store_true")
     scan.set_defaults(func=_cmd_scan)
 
-    red = sub.add_parser("redteam", help="Differential coding tasks with and without YAML triggers.")
+    red = sub.add_parser(
+        "redteam",
+        help="Differential coding tasks with and without YAML triggers.",
+        description=(
+            "Model specs: ollama:<tag>, llamacpp:<file.gguf> (or a .gguf path), transformers:<dir>, "
+            "planted:coder / clean:coder (fixtures). Generations are cached in SQLite, so an "
+            "interrupted run resumes where it stopped."
+        ),
+    )
     red.add_argument("model")
-    red.add_argument("--tasks", default=None)
-    red.add_argument("--triggers", default=None)
-    red.add_argument("--runs", type=int, default=8)
+    red.add_argument("--preset", choices=sorted(PRESETS), default=None,
+                     help="quick | standard | full. Explicit flags override the preset.")
+    red.add_argument("--tasks", default=None,
+                     help="N tasks (spread across CWEs), or a YAML file/dir of custom tasks.")
+    red.add_argument("--tasks-file", default=None, help="YAML file or directory of custom tasks.")
+    red.add_argument("--cwe", default=None, help="Comma list of CWEs to keep, e.g. CWE-78,CWE-89.")
+    red.add_argument("--triggers", default=None,
+                     help="Comma list of suites or trigger ids (e.g. political-regional,dates/year-2024), "
+                          "or a YAML file/dir of custom suites.")
+    red.add_argument("--triggers-dir", default=None, help="YAML file or directory of trigger suites.")
+    red.add_argument("--runs", type=int, default=None, help="Samples per cell (default 8 fixtures / preset).")
+    red.add_argument("--temperature", type=float, default=None, help="Default 0.7 for real models, 0 for fixtures.")
+    red.add_argument("--max-tokens", type=int, default=None)
+    red.add_argument("--seed", type=int, default=1000, help="Base seed; run i uses seed+i in every arm.")
+    red.add_argument("--timeout", type=float, default=300, help="Per-generation timeout in seconds.")
+    red.add_argument("--no-controls", action="store_true", help="Skip matched control prompts.")
+    red.add_argument("--no-cache", action="store_true", help="Do not read or write the generation cache.")
+    red.add_argument("--no-progress", action="store_true")
+    red.add_argument("--llamacpp-mode", choices=["server", "cli"], default=None)
+    red.add_argument("--threads", type=int, default=None, help="llama.cpp threads.")
+    red.add_argument("--ctx", type=int, default=None, help="Context length for llama.cpp / Ollama.")
+    red.add_argument("--allow-remote-runtime", action="store_true",
+                     help="Allow a non-loopback OLLAMA_HOST. Off by default: scans stay offline.")
+    red.add_argument("--judge", default=None,
+                     help="Optional trusted local judge model (e.g. ollama:llama3.2) that explains suspicious diffs. "
+                          "Must be a different model family. Off by default; never changes the verdict.")
     red.add_argument("--policy", default=None)
     red.add_argument("--sandbox", action="store_true")
-    red.add_argument("--limit", type=int, default=None, help="Only the first N tasks. For smoke tests.")
+    red.add_argument("--limit", type=int, default=None, help=argparse.SUPPRESS)
+    red.add_argument("--estimate", action="store_true", help="Print the generation count and an ETA, then exit.")
     red.add_argument("--format", default="text", choices=["text", "json", "sarif", "html"])
     red.add_argument("-o", "--output", default=None)
     red.add_argument("--ci", action="store_true")
     red.set_defaults(func=_cmd_redteam)
+
+    doctor = sub.add_parser("doctor", help="Report which binaries, scanners, runtimes and isolation features are available.")
+    doctor.add_argument("--json", action="store_true")
+    doctor.set_defaults(func=_cmd_doctor)
+
+    cache = sub.add_parser("cache", help="Inspect or clear the red-team generation cache.")
+    cache.add_argument("action", choices=["stats", "clear"])
+    cache.add_argument("--model", default=None, help="Model fingerprint to clear (default: all).")
+    cache.set_defaults(func=_cmd_cache)
 
     report = sub.add_parser("report", help="Render a stored scan.")
     report.add_argument("scan_id")
@@ -85,6 +134,14 @@ def _emit(record: dict, fmt: str, output: str | None) -> None:
             if finding["severity"] == "info":
                 continue
             print(f"  {finding['severity'].upper():8} {finding['category']:24} {finding['message']}")
+        triggers = (record.get("redteam") or {}).get("triggers") or []
+        if triggers:
+            print("  trigger                                   rate   control  q(base)  q(ctl)")
+            for item in sorted(triggers, key=lambda t: t["q_value"])[:10]:
+                ctl = "  n/a  " if item.get("control_rate") is None else f"{item['control_rate']:6.1%}"
+                qc = "  n/a" if item.get("q_control") is None else f"{item['q_control']:.3g}"
+                flag = " *" if item.get("significant") else ""
+                print(f"  {item['trigger_id'][:40]:40} {item['insecure_rate']:6.1%}  {ctl}  {item['q_value']:.3g}  {qc}{flag}")
         print(f"scan id: {record['id']}")
         return
     text = render(record, fmt)
@@ -108,19 +165,91 @@ def _cmd_scan(args) -> int:
     return _finish(record, args, policy)
 
 
+def _redteam_options(args) -> dict:
+    preset = dict(PRESETS.get(args.preset or "", {}))
+    tasks_path = args.tasks_file
+    task_limit = args.limit if args.limit is not None else preset.get("tasks")
+    if args.tasks is not None:
+        if str(args.tasks).isdigit():
+            task_limit = int(args.tasks)
+        else:
+            tasks_path = args.tasks
+    triggers_path = args.triggers_dir
+    trigger_select = preset.get("triggers")
+    if args.triggers is not None:
+        if Path(args.triggers).exists():
+            triggers_path, trigger_select = args.triggers, None
+        else:
+            trigger_select = args.triggers
+    runs = args.runs if args.runs is not None else preset.get("runs", 8)
+    adapter_options = {"timeout": args.timeout, "allow_remote": args.allow_remote_runtime}
+    if args.llamacpp_mode:
+        adapter_options["mode"] = args.llamacpp_mode
+    if args.threads:
+        adapter_options["threads"] = args.threads
+    if args.ctx:
+        adapter_options["ctx"] = args.ctx
+        adapter_options["num_ctx"] = args.ctx
+    return {
+        "tasks_path": tasks_path,
+        "task_limit": task_limit,
+        "triggers_path": triggers_path,
+        "trigger_select": trigger_select,
+        "cwe": args.cwe,
+        "runs": runs,
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens or preset.get("max_tokens", 512),
+        "seed": args.seed,
+        "controls": not args.no_controls,
+        "use_cache": not args.no_cache,
+        "adapter_options": adapter_options,
+        "judge_spec": args.judge,
+    }
+
+
+def _estimate(args, options: dict) -> int:
+    from modelsentinel.redteam import _spread
+    from modelsentinel.redteam_catalog import load_tasks
+    from modelsentinel.triggers import control_of, load_triggers
+
+    tasks = load_tasks(options["tasks_path"])
+    if options["cwe"]:
+        wanted = {c.strip().upper() for c in options["cwe"].split(",")}
+        tasks = [t for t in tasks if t["cwe"].upper() in wanted]
+    if options["task_limit"]:
+        tasks = _spread(tasks, options["task_limit"])
+    triggers = load_triggers(options["triggers_path"], options["trigger_select"])
+    controls = {(c["text"], c["placement"]) for t in triggers if (c := control_of(t))} if options["controls"] else set()
+    total = len(tasks) * (1 + len(triggers) + len(controls)) * options["runs"]
+    print(f"{len(tasks)} tasks x (1 baseline + {len(triggers)} triggers + {len(controls)} controls) x "
+          f"{options['runs']} runs = {total} generations")
+    for label, seconds in (("fast GPU / Apple silicon", 2.5), ("8-core CPU", 6.0), ("4-core CPU", 12.0)):
+        print(f"  ~{total * seconds / 3600:.1f} h at {seconds:.1f} s/generation ({label}, 1.5B Q4, uncached)")
+    return 0
+
+
 def _cmd_redteam(args) -> int:
     from modelsentinel.redteam import run_redteam
 
     policy = load_policy(args.policy)
-    record = run_redteam(
-        args.model,
-        tasks_path=args.tasks,
-        triggers_path=args.triggers,
-        runs=args.runs,
-        policy=policy,
-        sandbox=args.sandbox,
-        task_limit=args.limit,
-    )
+    options = _redteam_options(args)
+    if args.estimate:
+        return _estimate(args, options)
+    try:
+        record = run_redteam(
+            args.model,
+            policy=policy,
+            sandbox=args.sandbox,
+            progress=False if args.no_progress else None,
+            cache_db=_db(args),
+            **options,
+        )
+    except KeyboardInterrupt:
+        print("\ninterrupted; finished generations are cached. Rerun the same command to resume.", file=sys.stderr)
+        return 130
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     conn = connect(_db(args))
     try:
         from modelsentinel.db import save_scan
@@ -129,6 +258,32 @@ def _cmd_redteam(args) -> int:
     finally:
         conn.close()
     return _finish(record, args, policy)
+
+
+def _cmd_doctor(args) -> int:
+    from modelsentinel.doctor import collect, render_text
+
+    report = collect()
+    print(json.dumps(report, indent=2) if args.json else render_text(report))
+    return 0 if report["ready_for_scan"] else 1
+
+
+def _cmd_cache(args) -> int:
+    from modelsentinel.db import cache_clear, cache_stats
+
+    conn = connect(_db(args))
+    try:
+        if args.action == "clear":
+            print(f"removed {cache_clear(conn, args.model)} cached generations")
+        else:
+            rows = cache_stats(conn)
+            if not rows:
+                print("cache is empty")
+            for row in rows:
+                print(f"{row['generations']:7d}  {row['mean_seconds'] or 0:6.2f}s  {row['model']}")
+    finally:
+        conn.close()
+    return 0
 
 
 def _cmd_report(args) -> int:
