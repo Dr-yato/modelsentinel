@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 
 from modelsentinel import __version__
@@ -30,6 +31,18 @@ def dashboard_dir() -> Path | None:
 
 
 DIST = dashboard_dir() or ROOT / "dashboard" / "dist"
+
+
+class _SpaFiles(StaticFiles):
+    """Serve the built dashboard; unknown non-API paths fall back to index.html (client-side routes)."""
+
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or path.startswith("api/"):
+                raise
+            return await super().get_response("index.html", scope)
 
 
 class ScanRequest(BaseModel):
@@ -123,7 +136,7 @@ def create_app(db_path: Path) -> FastAPI:
 
     dist = dashboard_dir()
     if dist is not None:
-        app.mount("/", StaticFiles(directory=dist, html=True), name="dashboard")
+        app.mount("/", _SpaFiles(directory=dist, html=True), name="dashboard")
     else:
 
         @app.get("/")

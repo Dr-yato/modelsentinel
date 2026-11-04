@@ -395,17 +395,10 @@ def _sandbox_demo_record() -> dict:
             )
         )
     score, verdict = judge(findings)
-    events = []
-    for event in result.get("events") or []:
-        if event.get("probe"):
-            continue
-        events.append(
-            {
-                "label": "canary-snippet",
-                "kind": event.get("kind", ""),
-                "detail": str(event.get("detail") or event.get("event") or "")[:300],
-            }
-        )
+    from modelsentinel.sandboxrun import summarize_result, timeline_events
+
+    events = timeline_events(result, "canary-snippet")
+    brief = summarize_result(result)
     return {
         "id": uuid.uuid4().hex[:12],
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -415,7 +408,7 @@ def _sandbox_demo_record() -> dict:
         "name": "sandbox canary",
         "verdict": verdict,
         "score": score,
-        "summary": "Executed a snippet that reads the canary AWS file and requests http://exfil.example/collect. The request was blocked.",
+        "summary": "Executed a snippet that reads the canary AWS file and requests http://exfil.example/collect. The sink captured the request; nothing left the machine.",
         "findings": [item.to_dict() for item in findings],
         "files": [],
         "generations": [],
@@ -423,8 +416,10 @@ def _sandbox_demo_record() -> dict:
         "redteam": None,
         "sandbox": {
             "samples": 1,
-            "canary_read": bool(result.get("canary_read")),
-            "outbound_attempt": bool(result.get("outbound_attempt")),
+            "canary_read": bool(brief.get("canary_read")),
+            "outbound_attempt": bool(brief.get("outbound_attempt")),
+            "outbound_hosts": brief.get("outbound_hosts") or [],
+            "isolation": brief.get("isolation"),
         },
         "limitation": "The sandbox contained this snippet. It does not say anything about a model that was not executed here.",
     }

@@ -416,3 +416,33 @@ def findings_from_sandbox(summary: dict, location: str = "") -> list[Finding]:
             )
         )
     return findings
+
+
+def timeline_events(result: dict, label: str, limit: int = 200) -> list[dict]:
+    """Events worth showing on a timeline.
+
+    Drops enforcement probes and interpreter/stdlib file opens (``system``
+    flag), which are import noise, and replaces the real home directory with
+    ``~`` so stored reports do not leak local usernames. A trailing summary
+    event records how many system opens were hidden.
+    """
+    home = str(Path.home())
+    hidden = 0
+    events: list[dict] = []
+    for event in result.get("events") or []:
+        if event.get("probe"):
+            continue
+        if event.get("kind") == "file_access" and event.get("system"):
+            hidden += 1
+            continue
+        detail = str(event.get("detail") or event.get("event") or "")
+        if home and home != "/":
+            detail = detail.replace(home, "~")
+        events.append({"label": label, "kind": event.get("kind", ""), "detail": detail[:300],
+                       "raw": {k: v for k, v in event.items() if k not in {"detail", "path", "args"}}})
+        if len(events) >= limit:
+            break
+    if hidden:
+        events.append({"label": label, "kind": "file_access_summary",
+                       "detail": f"{hidden} interpreter/stdlib file opens hidden", "raw": {"hidden": hidden}})
+    return events

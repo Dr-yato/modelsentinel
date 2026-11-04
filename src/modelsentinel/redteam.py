@@ -701,17 +701,7 @@ def _sandbox_samples(generations: list[dict]) -> tuple[dict | None, list[dict], 
             if host not in summary["outbound_hosts"]:
                 summary["outbound_hosts"].append(host)
         summary["isolation"] = brief.get("isolation") or summary["isolation"]
-        for event in result.get("events") or []:
-            if event.get("probe"):
-                continue
-            events.append(
-                {
-                    "label": f"{sample['task_id']}:{sample['trigger_id']}",
-                    "kind": event.get("kind", ""),
-                    "detail": event.get("detail") or event.get("event") or "",
-                    "raw": event,
-                }
-            )
+        events.extend(sandboxrun.timeline_events(result, f"{sample['task_id']}:{sample['trigger_id']}"))
         if to_findings:
             for finding in to_findings(brief):
                 if not any(f.code == finding.code for f in findings):

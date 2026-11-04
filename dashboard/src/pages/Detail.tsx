@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import {
   fetchDiffs,
@@ -19,6 +19,8 @@ type Tab = "findings" | "triggers" | "heatmap" | "diffs" | "sandbox";
 
 export function DetailPage() {
   const { id = "" } = useParams();
+  const [params, setParams] = useSearchParams();
+  const requestedTab = params.get("tab") as Tab | null;
   const [scan, setScan] = useState<ScanDetail | null>(null);
   const [cells, setCells] = useState<HeatCell[]>([]);
   const [diffs, setDiffs] = useState<DiffItem[]>([]);
@@ -26,6 +28,10 @@ export function DetailPage() {
   const [tab, setTab] = useState<Tab>("findings");
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
+
+  useEffect(() => {
+    if (requestedTab) setTab(requestedTab);
+  }, [requestedTab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +44,8 @@ export function DetailPage() {
         setCells(heat.cells);
         setDiffs(diff.diffs);
         setEvents(sandbox.events);
-        if (detail.kind === "redteam") setTab(detail.redteam?.triggers?.length ? "triggers" : "heatmap");
+        if (requestedTab) setTab(requestedTab);
+        else if (detail.kind === "redteam") setTab(detail.redteam?.triggers?.length ? "triggers" : "heatmap");
       })
       .catch((reason: Error) => {
         if (!cancelled) setError(reason.message);
@@ -99,7 +106,10 @@ export function DetailPage() {
             aria-selected={tab === item.id}
             variant={tab === item.id ? "default" : "outline"}
             size="sm"
-            onClick={() => setTab(item.id)}
+            onClick={() => {
+              setTab(item.id);
+              setParams({ tab: item.id }, { replace: true });
+            }}
           >
             {item.label}
           </Button>

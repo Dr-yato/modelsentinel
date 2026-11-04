@@ -10,6 +10,7 @@ build/
 dashboard/dist/
 dashboard/node_modules/
 dist/
+fixtures/
 native/target-linux/
 native/target/
 src/modelsentinel/bin/
