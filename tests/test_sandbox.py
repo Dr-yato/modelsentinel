@@ -69,13 +69,21 @@ def test_dns_lookup_and_raw_udp_dns_are_logged(backend):
 
 def test_process_spawn_is_blocked_and_marker_never_written(backend, tmp_path: Path):
     marker = tmp_path / "pwned.txt"
+    # Every path is embedded with repr() so the snippet compiles on Windows too:
+    # a raw "C:\Users\..." inside a normal string literal is a \U escape -> SyntaxError,
+    # and then nothing runs and nothing is spawned.
+    child_code = f"import pathlib; pathlib.Path({marker.as_posix()!r}).write_text('x')"
+    shell_cmd = f"echo pwned > {marker.as_posix()}"
     source = (
         "import os, subprocess\n"
-        f"try:\n    os.system('echo pwned > {marker.as_posix()}')\nexcept PermissionError:\n    print('system-blocked')\n"
-        f"try:\n    subprocess.run([{sys.executable!r}, '-c', 'import pathlib; pathlib.Path(r\"{marker}\").write_text(\"x\")'])\n"
+        f"try:\n    os.system({shell_cmd!r})\nexcept PermissionError:\n    print('system-blocked')\n"
+        f"try:\n    subprocess.run([{sys.executable!r}, '-c', {child_code!r}])\n"
         "except PermissionError:\n    print('popen-blocked')\n"
     )
+    compile(source, "snippet.py", "exec")  # the snippet itself must be valid on every OS
     result = run_source(source, timeout=10)
+    errors = [e for e in result["events"] if e.get("kind") == "runtime_error"]
+    assert not errors, errors
     assert result["process_spawn"] is True
     assert result["blocked_actions"] >= 2
     assert "system-blocked" in result["stdout"] and "popen-blocked" in result["stdout"]
