@@ -71,7 +71,6 @@ jobs:
     # cannot block a merge; failures upload the crashing input.
     runs-on: ubuntu-latest
     continue-on-error: true
-    if: hashFiles('native/fuzz/Cargo.toml') != ''
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
