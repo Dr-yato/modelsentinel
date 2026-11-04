@@ -32,3 +32,28 @@ jobs:
             exit 1
           fi
           python -m modelsentinel scan fixtures/gguf/clean_template.gguf --ci
+
+  sandbox-cross-platform:
+    # The sandbox binary must build and behave on every OS. Kernel isolation
+    # (seccomp/Landlock) is asserted by the ubuntu job above; here macOS and
+    # Windows must report isolation "reduced" and still log canaries, hosts
+    # and blocked actions.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sandbox and parser
+        run: cargo build --manifest-path native/Cargo.toml
+      - name: Rust sandbox unit tests
+        run: cargo test --manifest-path native/Cargo.toml --lib -- jail spawn
+      - name: Python package
+        run: pip install -e ".[dev]"
+      - name: Sandbox tests
+        run: pytest tests/test_sandbox.py -v

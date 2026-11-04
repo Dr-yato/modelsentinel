@@ -85,9 +85,17 @@ def parse_file(path: Path, timeout: float = 120) -> dict:
         raise NativeError(f"sentinel-parse returned invalid JSON: {exc}") from exc
 
 
-def run_sandbox(code_path: Path, timeout: int = 5) -> dict:
+def run_sandbox(code_path: Path, timeout: int = 5, language: str = "python") -> dict:
     proc = subprocess.run(
-        [str(binary("sentinel-sandbox")), "--code", str(code_path), "--timeout", str(timeout)],
+        [
+            str(binary("sentinel-sandbox")),
+            "--code",
+            str(code_path),
+            "--timeout",
+            str(timeout),
+            "--lang",
+            language,
+        ],
         capture_output=True,
         text=True,
         timeout=timeout + 20,

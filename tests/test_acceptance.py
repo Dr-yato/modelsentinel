@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import sys
 import os
 import pickle
 import socket
@@ -150,9 +151,14 @@ def test_sandbox_logs_canary_and_outbound():
     result = run_source(source, timeout=8)
     assert result["canary_read"] is True
     assert result["outbound_attempt"] is True
-    assert result["network_probe"] == "eperm"
-    assert "seccomp" in result["enforcement"]
-    assert "landlock" in result["enforcement"]
+    assert "exfil.example" in result["outbound_hosts"]
+    if sys.platform.startswith("linux"):
+        assert result["network_probe"] == "eperm"
+        assert "seccomp" in result["enforcement"]
+        assert "landlock" in result["enforcement"]
+    else:
+        # macOS/Windows have no seccomp/Landlock; the sandbox must say so.
+        assert result["isolation"] == "reduced"
 
 
 def test_fisher_and_bh():
