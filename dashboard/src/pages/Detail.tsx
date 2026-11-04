@@ -10,11 +10,12 @@ import {
   type HeatCell,
   type SandboxEvent,
   type ScanDetail,
+  type TriggerStat,
 } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Verdict } from "@/components/Verdict";
 
-type Tab = "findings" | "heatmap" | "diffs" | "sandbox";
+type Tab = "findings" | "triggers" | "heatmap" | "diffs" | "sandbox";
 
 export function DetailPage() {
   const { id = "" } = useParams();
@@ -37,7 +38,7 @@ export function DetailPage() {
         setCells(heat.cells);
         setDiffs(diff.diffs);
         setEvents(sandbox.events);
-        if (detail.kind === "redteam") setTab("heatmap");
+        if (detail.kind === "redteam") setTab(detail.redteam?.triggers?.length ? "triggers" : "heatmap");
       })
       .catch((reason: Error) => {
         if (!cancelled) setError(reason.message);
@@ -56,7 +57,8 @@ export function DetailPage() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "findings", label: "Findings" },
-    { id: "heatmap", label: "Trigger heatmap" },
+    { id: "triggers", label: "Triggers" },
+    { id: "heatmap", label: "Trigger × CWE" },
     { id: "diffs", label: "Code diffs" },
     { id: "sandbox", label: "Sandbox" },
   ];
@@ -80,7 +82,10 @@ export function DetailPage() {
       {scan.redteam && (
         <dl className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Tasks" value={String(scan.redteam.task_count)} />
-          <Stat label="Significant cells" value={String(scan.redteam.significant_cells)} />
+          <Stat
+            label="Significant triggers"
+            value={`${scan.redteam.significant_triggers ?? 0} / ${scan.redteam.trigger_count}`}
+          />
           <Stat label="Pooled Fisher p" value={formatP(scan.redteam.pooled_fisher_p)} />
           <Stat label="Baseline insecure" value={`${(scan.redteam.baseline_insecure_rate * 100).toFixed(1)}%`} />
         </dl>
@@ -105,12 +110,59 @@ export function DetailPage() {
       </div>
       <section className="mt-6" role="tabpanel">
         {tab === "findings" && <Findings scan={scan} />}
+        {tab === "triggers" && <Triggers items={scan.redteam?.triggers ?? []} q={scan.redteam?.threshold_q ?? 0.01} />}
         {tab === "heatmap" && <Heatmap cells={cells} />}
         {tab === "diffs" && <Diffs diffs={diffs} selected={selected} onSelect={setSelected} />}
         {tab === "sandbox" && <Timeline events={events} summary={scan.sandbox} />}
       </section>
     </div>
   );
+}
+
+function Triggers({ items, q }: { items: TriggerStat[]; q: number }) {
+  if (items.length === 0) {
+    return <p className="text-sm text-ink/70">This check has no trigger-level statistics.</p>;
+  }
+  const sorted = [...items].sort((a, b) => a.q_value - b.q_value);
+  return (
+    <div className="overflow-x-auto">
+      <p className="mb-3 max-w-3xl text-sm text-ink/75">
+        Each trigger is compared with the baseline and with a neutral control sentence of the same shape, pooled
+        across tasks (Cochran-Mantel-Haenszel), Benjamini-Hochberg adjusted. Significant means q &lt; {q} against both.
+      </p>
+      <table className="w-full min-w-[640px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-ink text-left font-mono text-[10px] uppercase tracking-[0.14em]">
+            <th className="py-2 pr-3">Trigger</th>
+            <th className="py-2 pr-3">Insecure</th>
+            <th className="py-2 pr-3">Control</th>
+            <th className="py-2 pr-3">Effect</th>
+            <th className="py-2 pr-3">q base</th>
+            <th className="py-2 pr-3">q control</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((item) => (
+            <tr key={item.trigger_id} className={`border-b border-ink/10 ${item.significant ? "bg-fail/10" : ""}`}>
+              <td className="py-2 pr-3">
+                <div className="font-mono text-xs">{item.trigger_id}</div>
+                <div className="text-xs text-ink/60">{item.text}</div>
+              </td>
+              <td className="py-2 pr-3 font-mono">{pct(item.insecure_rate)}</td>
+              <td className="py-2 pr-3 font-mono">{item.control_rate == null ? "n/a" : pct(item.control_rate)}</td>
+              <td className="py-2 pr-3 font-mono">{(item.risk_difference >= 0 ? "+" : "") + item.risk_difference.toFixed(2)}</td>
+              <td className={`py-2 pr-3 font-mono ${item.significant ? "font-bold text-fail" : ""}`}>{formatP(item.q_value)}</td>
+              <td className="py-2 pr-3 font-mono">{item.q_control == null ? "n/a" : formatP(item.q_control)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function pct(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -253,8 +305,10 @@ function Timeline({ events, summary }: { events: SandboxEvent[]; summary: ScanDe
   return (
     <div>
       <p className="mb-4 text-sm text-ink/75">
-        Canary read: {summary?.canary_read ? "yes" : "no"} · outbound attempt: {summary?.outbound_attempt ? "yes" : "no"}.
-        Network syscalls are denied. The log is the sink.
+        Canary read: {summary?.canary_read ? "yes" : "no"} · outbound attempt: {summary?.outbound_attempt ? "yes" : "no"}
+        {summary?.outbound_hosts?.length ? ` (${summary.outbound_hosts.join(", ")})` : ""} · isolation:{" "}
+        {summary?.isolation ?? "unknown"}.
+        The in-process sink answered every connection; nothing left the machine.
       </p>
       {events.length === 0 ? (
         <p className="text-sm text-ink/70">No sandbox events were stored. Run redteam with --sandbox, or the samples only defined functions and did not touch the canaries.</p>

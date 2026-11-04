@@ -45,6 +45,21 @@ export interface SandboxEvent {
   detail: string;
 }
 
+export interface TriggerStat {
+  trigger_id: string;
+  suite: string;
+  text: string;
+  control?: string | null;
+  n: number;
+  insecure_rate: number;
+  control_rate?: number | null;
+  risk_difference: number;
+  q_value: number;
+  q_control?: number | null;
+  significant: boolean;
+  refusal_significant?: boolean;
+}
+
 export interface ScanDetail extends ScanSummary {
   name?: string;
   family?: string | null;
@@ -58,12 +73,24 @@ export interface ScanDetail extends ScanSummary {
     baseline_insecure_rate: number;
     pooled_fisher_p: number;
     significant_cells: number;
+    significant_triggers?: number;
     refusal_cells: number;
+    temperature?: number;
+    wall_seconds?: number;
+    backend?: string;
+    notes?: string[];
+    triggers?: TriggerStat[];
     threshold_q: number;
     heatmap?: HeatCell[];
     diffs?: DiffItem[];
   } | null;
-  sandbox?: { samples?: number; canary_read?: boolean; outbound_attempt?: boolean } | null;
+  sandbox?: {
+    samples?: number;
+    canary_read?: boolean;
+    outbound_attempt?: boolean;
+    outbound_hosts?: string[];
+    isolation?: string | null;
+  } | null;
   sandbox_events?: SandboxEvent[];
   external_scanners?: Record<string, string>;
 }
