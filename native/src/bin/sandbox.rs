@@ -5,7 +5,8 @@
 //! Docker (`--network none`) there when Docker is available.
 
 use sentinel_native::restrict::{
-    apply_landlock, apply_seccomp, close_fds, network_filter, open_path, LandlockFds, SockFilter,
+    apply_landlock, apply_seccomp, close_fds, last_errno, network_filter, open_path, set_no_new_privs,
+    LandlockFds, SockFilter,
 };
 use serde_json::{json, Value};
 use std::env;
@@ -283,7 +284,7 @@ fn spawn_once(
         cmd.pre_exec(move || {
             // Landlock refuses to restrict a process that can still gain
             // privileges. Set no_new_privs before the ruleset, then seccomp.
-            let _ = libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+            set_no_new_privs();
             if use_landlock {
                 let borrowed = LandlockFds {
                     read: fds_read.clone(),
@@ -298,7 +299,7 @@ fn spawn_once(
                         );
                     }
                     Err(_) => {
-                        let err = *libc::__errno_location();
+                        let err = last_errno();
                         let mut buf = [0u8; 32];
                         let text = b"landlock-err:";
                         buf[..text.len()].copy_from_slice(text);

@@ -3,6 +3,7 @@
 //! These are applied in the forked child before `exec`. They are a containment
 //! layer for generated code, not a claim that a hostile program cannot escape.
 
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 use std::io;
 
 #[repr(C)]
@@ -128,6 +129,30 @@ pub fn network_filter() -> Vec<SockFilter> {
     prog
 }
 
+/// Set `no_new_privs`. Required before seccomp and Landlock. No-op off Linux.
+pub fn set_no_new_privs() {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+    }
+}
+
+/// Last errno, async-signal-safe (usable inside `pre_exec`).
+pub fn last_errno() -> i32 {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+
+/// True when this build can apply seccomp/Landlock at all.
+pub const fn kernel_isolation_supported() -> bool {
+    cfg!(target_os = "linux")
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn apply_seccomp(_filter: &[SockFilter]) -> io::Result<()> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "seccomp requires Linux"))
+}
+
+#[cfg(target_os = "linux")]
 pub fn apply_seccomp(filter: &[SockFilter]) -> io::Result<()> {
     if filter.is_empty() || audit_arch() == 0 {
         return Err(io::Error::new(
@@ -175,6 +200,7 @@ struct PathBeneathAttr {
     parent_fd: i32,
 }
 
+#[cfg(target_os = "linux")]
 fn landlock_abi() -> i32 {
     let rc = unsafe { libc::syscall(LANDLOCK_CREATE, std::ptr::null::<u8>(), 0usize, 1u32) };
     if rc < 0 {
@@ -203,6 +229,12 @@ pub struct LandlockFds {
     pub write: Vec<i32>,
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn open_path(_path: &str) -> Option<i32> {
+    None
+}
+
+#[cfg(target_os = "linux")]
 pub fn open_path(path: &str) -> Option<i32> {
     let c = std::ffi::CString::new(path).ok()?;
     let flags = libc::O_PATH | libc::O_CLOEXEC;
@@ -214,6 +246,12 @@ pub fn open_path(path: &str) -> Option<i32> {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn apply_landlock(_fds: &LandlockFds) -> io::Result<()> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "landlock requires Linux"))
+}
+
+#[cfg(target_os = "linux")]
 pub fn apply_landlock(fds: &LandlockFds) -> io::Result<()> {
     let abi = landlock_abi();
     if abi < 1 {
@@ -257,6 +295,7 @@ pub fn apply_landlock(fds: &LandlockFds) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn add_rule(ruleset: i64, fd: i32, access: u64) -> io::Result<()> {
     let beneath = PathBeneathAttr {
         allowed_access: access,
@@ -284,7 +323,7 @@ pub fn close_fds(fds: &LandlockFds) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 
