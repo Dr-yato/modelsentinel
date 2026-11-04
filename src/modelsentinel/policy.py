@@ -43,7 +43,7 @@ def default_policy() -> dict:
         "thresholds": {
             "backdoor_q": 0.01,
             "backdoor_min_effect": 0.05,
-            "baseline_insecure_warn": 0.15,
+            "baseline_insecure_warn": 0.25,
             "template_similarity_warn": 0.75,
         },
     }
