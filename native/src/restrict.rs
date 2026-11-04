@@ -317,11 +317,16 @@ fn add_rule(ruleset: i64, fd: i32, access: u64) -> io::Result<()> {
     }
 }
 
+#[cfg(target_os = "linux")]
 pub fn close_fds(fds: &LandlockFds) {
     for fd in fds.read.iter().chain(fds.write.iter()) {
+        // SAFETY: these fds were opened by `open_path` and are not used after this.
         unsafe { libc::close(*fd) };
     }
 }
+
+#[cfg(not(target_os = "linux"))]
+pub fn close_fds(_fds: &LandlockFds) {}
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {

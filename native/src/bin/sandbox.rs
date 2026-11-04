@@ -1,47 +1,75 @@
-//! Run one generated snippet under a cleared environment, with canary secrets,
-//! a seccomp network deny-list, and (when the kernel allows) a Landlock policy.
+//! Run one generated Python snippet in a throwaway jail and report what it did.
 //!
-//! macOS and Windows do not have this backend. The Python CLI falls back to
-//! Docker (`--network none`) there when Docker is available.
+//! Every platform gets: a cleared environment, a temp HOME/USERPROFILE holding
+//! canary secrets, an audit-hook runner that logs every file open, an
+//! in-process DNS/HTTP sink that records hostnames and payloads, and hook-level
+//! denial of process spawn / raw sockets / writes outside the jail.
+//!
+//! On top of that, per platform:
+//! - Linux: seccomp denies socket syscalls and Landlock confines the
+//!   filesystem. When both probes confirm it, isolation is `full`.
+//! - macOS: `sandbox-exec` (when present) denies network and writes outside
+//!   the jail. Isolation is reported as `reduced` because reads are not
+//!   confined.
+//! - Windows and others: hook-level containment only, isolation `reduced`.
+//! - `--docker`: `--network none` container from a *local* image (never
+//!   pulled), isolation `container`.
+//!
+//! Only Python is executed. Other languages are refused, not run.
 
-use sentinel_native::restrict::{
-    apply_landlock, apply_seccomp, close_fds, last_errno, network_filter, open_path, set_no_new_privs,
-    LandlockFds, SockFilter,
+use sentinel_native::jail::{
+    child_env, isolation_level, isolation_notes, summarise, tail, Jail,
 };
+use sentinel_native::spawn::{find_program, resolve_python, run_with_timeout, Outcome};
 use serde_json::{json, Value};
 use std::env;
-use std::fs;
-use std::io::{Read, Write};
-use std::os::unix::process::CommandExt;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::process::Command;
+use std::time::Duration;
 
-const RUNNER: &str = include_str!("../sandbox_runner.py");
+const USAGE: &str = "usage: sentinel-sandbox --code FILE [--timeout SECONDS] [--lang python] [--docker] [--docker-image IMAGE]";
+const DEFAULT_IMAGE: &str = "python:3.11-slim";
+const MAX_EVENTS_OUT: usize = 1500;
 
 struct Args {
     code: PathBuf,
     timeout: Duration,
     docker: bool,
+    image: String,
+    lang: String,
+}
+
+/// What a platform backend hands back to the common reporting code.
+struct Run {
+    outcome: Outcome,
+    enforcement: Vec<String>,
+    restrict_status: String,
 }
 
 fn main() {
     let args = match parse_args() {
         Ok(args) => args,
         Err(message) => {
-            emit_error(&message);
+            emit_error(&message, "none");
             std::process::exit(2);
         }
     };
-    let result = if args.docker {
-        run_docker(&args)
-    } else {
-        run_native(&args)
-    };
+    if !matches!(args.lang.as_str(), "python" | "py") {
+        emit_error(
+            &format!(
+                "unsupported language '{}': only Python snippets are executed; JavaScript and shell are analysed statically but never run",
+                args.lang
+            ),
+            "none",
+        );
+        std::process::exit(3);
+    }
+    let result = if args.docker { run_docker(&args) } else { run_native(&args) };
     match result {
         Ok(value) => println!("{value}"),
         Err(message) => {
-            emit_error(&message);
+            emit_error(&message, "none");
             std::process::exit(1);
         }
     }
@@ -51,479 +79,388 @@ fn parse_args() -> Result<Args, String> {
     let mut code = None;
     let mut timeout = 5u64;
     let mut docker = false;
-    let mut iter = env::args().skip(1);
+    let mut image = env::var("SENTINEL_DOCKER_IMAGE").unwrap_or_else(|_| DEFAULT_IMAGE.into());
+    let mut lang = "python".to_string();
+    let mut iter = env::args_os().skip(1);
     while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--code" => {
-                code = Some(PathBuf::from(iter.next().ok_or("missing --code value")?));
-            }
+        let mut value = |name: &str| -> Result<OsString, String> {
+            iter.next().ok_or_else(|| format!("missing {name} value"))
+        };
+        match arg.to_str().unwrap_or("") {
+            "--code" => code = Some(PathBuf::from(value("--code")?)),
             "--timeout" => {
-                let raw = iter.next().ok_or("missing --timeout value")?;
-                timeout = raw.parse::<u64>().map_err(|_| "timeout must be seconds")?;
+                let raw = value("--timeout")?;
+                timeout = raw
+                    .to_str()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .ok_or("timeout must be whole seconds")?;
             }
+            "--lang" => lang = value("--lang")?.to_string_lossy().to_ascii_lowercase(),
             "--docker" => docker = true,
+            "--docker-image" => image = value("--docker-image")?.to_string_lossy().into_owned(),
             "-h" | "--help" => {
-                println!("usage: sentinel-sandbox --code FILE [--timeout SECONDS] [--docker]");
+                println!("{USAGE}");
                 std::process::exit(0);
             }
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    let code = code.ok_or("usage: sentinel-sandbox --code FILE [--timeout SECONDS]")?;
+    let code = code.ok_or(USAGE)?;
     if !code.is_file() {
         return Err(format!("code file not found: {}", code.display()));
     }
     Ok(Args {
         code,
-        timeout: Duration::from_secs(timeout.max(1)),
+        timeout: Duration::from_secs(timeout.clamp(1, 600)),
         docker,
+        image,
+        lang,
     })
+}
+
+fn base_enforcement() -> Vec<String> {
+    ["audit-hook", "cleared-env", "canary-secrets", "in-process-sink", "hook-deny"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn base_command(program: &Path, args: &[OsString], jail: &Jail, envs: &[(OsString, OsString)]) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .env_clear()
+        .envs(envs.iter().map(|(k, v)| (k, v)))
+        .current_dir(&jail.work);
+    cmd
+}
+
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+/// The runner never reached its probe: the interpreter (or the restriction
+/// around it) failed before any Python ran.
+fn runner_never_started(jail: &Jail, outcome: &Outcome) -> bool {
+    !outcome.timed_out
+        && !jail
+            .read_events()
+            .iter()
+            .any(|e| e.get("kind").and_then(|v| v.as_str()) == Some("enforcement_probe"))
 }
 
 fn run_native(args: &Args) -> Result<String, String> {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let jail = env::temp_dir().join(format!("modelsentinel-jail-{stamp}-{}", std::process::id()));
-    let home = jail.join("home");
-    let work = jail.join("work");
-    fs::create_dir_all(home.join(".ssh")).map_err(|e| e.to_string())?;
-    fs::create_dir_all(home.join(".aws")).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let python = resolve_python()?;
+    let jail = Jail::create(&env::temp_dir(), &args.code).map_err(|e| format!("jail: {e}"))?;
+    let envs = child_env(&jail, python.parent());
+    let run = platform::run(&python, &jail, &envs, args.timeout);
+    let value = run.map(|run| report(&jail, run, "native"));
+    jail.cleanup();
+    value.map(|v| v.to_string())
+}
 
-    let token = format!("{stamp:x}");
-    let canaries = vec![
-        write_canary(&home.join(".ssh/id_rsa"), &format!("SENTINEL_CANARY_SSH {token}\n"))?,
-        write_canary(
-            &home.join(".ssh/authorized_keys"),
-            &format!("SENTINEL_CANARY_AUTHKEYS {token}\n"),
-        )?,
-        write_canary(
-            &home.join(".aws/credentials"),
-            &format!("[default]\naws_access_key_id = SENTINEL_CANARY_AWS_{token}\naws_secret_access_key = SENTINEL_CANARY_SECRET_{token}\n"),
-        )?,
-        write_canary(&home.join(".env"), &format!("SENTINEL_CANARY_DOTENV={token}\nAPI_TOKEN=SENTINEL_CANARY_TOKEN_{token}\n"))?,
-    ];
-    let snippet = work.join("snippet.py");
-    fs::copy(&args.code, &snippet).map_err(|e| e.to_string())?;
-    let runner = work.join("runner.py");
-    fs::write(&runner, RUNNER).map_err(|e| e.to_string())?;
-    let events = work.join("events.jsonl");
-    let outside = env::temp_dir().join(format!("modelsentinel-outside-{stamp}.txt"));
-    fs::write(&outside, b"outside-jail-marker\n").map_err(|e| e.to_string())?;
-
-    let python = env::var("SENTINEL_PYTHON").unwrap_or_else(|_| "python3".into());
-    let canary_env = canaries
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>()
-        .join(":");
-
-    let filter = network_filter();
-    let filter: &'static [SockFilter] = Box::leak(filter.into_boxed_slice());
-    let read_paths = ["/usr", "/lib", "/lib64", "/etc", "/dev", "/proc", "/bin", "/sys"];
-    let mut fds = LandlockFds {
-        read: Vec::new(),
-        write: Vec::new(),
-    };
-    for path in read_paths {
-        if Path::new(path).exists() {
-            if let Some(fd) = open_path(path) {
-                fds.read.push(fd);
-            }
+fn report(jail: &Jail, run: Run, backend: &str) -> Value {
+    let events = jail.read_events();
+    let summary = summarise(&events);
+    let mut enforcement = run.enforcement;
+    if cfg!(target_os = "linux") && backend == "native" {
+        if summary.network_probe == "eperm" {
+            enforcement.push("seccomp".into());
+        }
+        if summary.filesystem_probe == "landlock-blocked" {
+            enforcement.push("landlock".into());
         }
     }
-    if let Some(fd) = open_path(&jail.display().to_string()) {
-        fds.write.push(fd);
+    if cfg!(target_os = "macos") && summary.network_probe == "eperm" && enforcement.iter().any(|e| e == "sandbox-exec") {
+        enforcement.push("sandbox-exec-network".into());
     }
-
-    let first = spawn_once(
-        &python,
-        &runner,
-        &snippet,
-        &events,
-        &home,
-        &work,
-        &jail,
-        &canary_env,
-        &outside,
-        args.timeout,
-        filter,
-        &fds,
-        true,
-    )?;
-    let (body, stderr_tail, status, enforcement, used_landlock) = if python_failed_to_start(&first) {
-        let second = spawn_once(
-            &python,
-            &runner,
-            &snippet,
-            &events,
-            &home,
-            &work,
-            &jail,
-            &canary_env,
-            &outside,
-            args.timeout,
-            filter,
-            &fds,
-            false,
-        )?;
-        (
-            second.stdout,
-            second.stderr,
-            second.status,
-            second.enforcement,
-            false,
-        )
-    } else {
-        (
-            first.stdout,
-            first.stderr,
-            first.status,
-            first.enforcement,
-            first.landlock_requested,
-        )
-    };
-
-    close_fds(&fds);
-    let _ = fs::remove_file(&outside);
-
-    let restrict_status = fs::read_to_string(work.join("restrict.txt")).unwrap_or_default();
-    let raw_events = fs::read_to_string(&events).unwrap_or_default();
-    let mut events = Vec::new();
-    for line in raw_events.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<Value>(line) {
-            Ok(value) => events.push(value),
-            Err(_) => events.push(json!({"kind": "parse_error", "detail": line})),
-        }
-    }
-    let (canary_read, outbound_attempt, filesystem, network) = summarise(&events);
-    let mut enforcement = enforcement;
-    if used_landlock && filesystem == "landlock-blocked" && !enforcement.iter().any(|e| e == "landlock") {
-        enforcement.push("landlock".into());
-    }
-    if network == "eperm" && !enforcement.iter().any(|e| e == "seccomp") {
-        enforcement.push("seccomp".into());
-    }
-    let value = json!({
+    let isolation = isolation_level(&enforcement, &summary);
+    let notes = isolation_notes(isolation, &summary);
+    let truncated = events.len() > MAX_EVENTS_OUT;
+    let shown: Vec<Value> = events.into_iter().take(MAX_EVENTS_OUT).collect();
+    json!({
+        "backend": backend,
+        "platform": env::consts::OS,
+        "language": "python",
+        "executed": true,
+        "isolation": isolation,
+        "isolation_notes": notes,
         "enforcement": enforcement,
-        "exit_code": status,
-        "timed_out": status == -9,
-        "canary_read": canary_read,
-        "outbound_attempt": outbound_attempt,
-        "network_probe": network,
-        "filesystem_probe": filesystem,
-        "events": events,
-        "stdout": tail(&body, 2000),
-        "stderr": tail(&stderr_tail, 2000),
-        "canary_token": token,
-        "jail": jail.display().to_string(),
-        "restrict_status": restrict_status.trim(),
-        "error": null,
-    });
-    // Leave the jail in place only if SENTINEL_KEEP_JAIL=1, so failures can be inspected.
-    if env::var("SENTINEL_KEEP_JAIL").ok().as_deref() != Some("1") {
-        let _ = fs::remove_dir_all(&jail);
-    }
-    Ok(value.to_string())
-}
-
-struct Spawned {
-    stdout: String,
-    stderr: String,
-    status: i32,
-    enforcement: Vec<String>,
-    landlock_requested: bool,
-}
-
-fn spawn_once(
-    python: &str,
-    runner: &Path,
-    snippet: &Path,
-    events: &Path,
-    home: &Path,
-    work: &Path,
-    jail: &Path,
-    canary_env: &str,
-    outside: &Path,
-    timeout: Duration,
-    filter: &'static [SockFilter],
-    fds: &LandlockFds,
-    landlock: bool,
-) -> Result<Spawned, String> {
-    let fds_read = fds.read.clone();
-    let fds_write = fds.write.clone();
-    let mut cmd = Command::new(python);
-    cmd.arg(runner)
-        .env_clear()
-        .env("HOME", home)
-        .env("TMPDIR", work)
-        .env("PATH", "/usr/bin:/bin")
-        .env("LANG", "C.UTF-8")
-        .env("LC_ALL", "C.UTF-8")
-        .env("PYTHONUNBUFFERED", "1")
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env("SENTINEL_CODE", snippet)
-        .env("SENTINEL_EVENTS", events)
-        .env("SENTINEL_CANARIES", canary_env)
-        .env("SENTINEL_OUTSIDE", outside)
-        .current_dir(work)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let use_landlock = landlock && !fds_write.is_empty();
-    let status_path = work.join("restrict.txt");
-    let status_file = fs::File::create(&status_path).map_err(|e| e.to_string())?;
-    use std::os::fd::IntoRawFd;
-    let status_fd = status_file.into_raw_fd();
-    unsafe {
-        cmd.pre_exec(move || {
-            // Landlock refuses to restrict a process that can still gain
-            // privileges. Set no_new_privs before the ruleset, then seccomp.
-            set_no_new_privs();
-            if use_landlock {
-                let borrowed = LandlockFds {
-                    read: fds_read.clone(),
-                    write: fds_write.clone(),
-                };
-                match apply_landlock(&borrowed) {
-                    Ok(()) => {
-                        let _ = libc::write(
-                            status_fd,
-                            b"landlock-ok\n".as_ptr() as *const libc::c_void,
-                            12,
-                        );
-                    }
-                    Err(_) => {
-                        let err = last_errno();
-                        let mut buf = [0u8; 32];
-                        let text = b"landlock-err:";
-                        buf[..text.len()].copy_from_slice(text);
-                        let mut n = text.len();
-                        let mut value = err.unsigned_abs();
-                        let mut digits = [0u8; 16];
-                        let mut d = 0;
-                        if value == 0 {
-                            digits[0] = b'0';
-                            d = 1;
-                        }
-                        while value > 0 && d < digits.len() {
-                            digits[d] = b'0' + (value % 10) as u8;
-                            value /= 10;
-                            d += 1;
-                        }
-                        while d > 0 {
-                            d -= 1;
-                            buf[n] = digits[d];
-                            n += 1;
-                        }
-                        buf[n] = b'\n';
-                        n += 1;
-                        let _ = libc::write(status_fd, buf.as_ptr() as *const libc::c_void, n);
-                    }
-                }
-            } else {
-                let _ = libc::write(
-                    status_fd,
-                    b"landlock-skipped\n".as_ptr() as *const libc::c_void,
-                    17,
-                );
-            }
-            // A seccomp failure must not abort the run; the probe records it.
-            let _ = apply_seccomp(filter);
-            Ok(())
-        });
-    }
-    let mut child = cmd.spawn().map_err(|e| format!("spawn python: {e}"))?;
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() > timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let mut enforcement = vec!["audit-hook".into(), "cleared-env".into(), "canary-secrets".into()];
-                if use_landlock {
-                    enforcement.push("landlock-requested".into());
-                }
-                return Ok(Spawned {
-                    stdout: String::new(),
-                    stderr: "timed out".into(),
-                    status: -9,
-                    enforcement,
-                    landlock_requested: use_landlock,
-                });
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(e) => return Err(format!("wait: {e}")),
-        }
-    };
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    if let Some(mut pipe) = child.stdout.take() {
-        let _ = pipe.read_to_string(&mut stdout);
-    }
-    if let Some(mut pipe) = child.stderr.take() {
-        let _ = pipe.read_to_string(&mut stderr);
-    }
-    let mut enforcement = vec![
-        "audit-hook".into(),
-        "cleared-env".into(),
-        "canary-secrets".into(),
-        "seccomp-requested".into(),
-    ];
-    if use_landlock {
-        enforcement.push("landlock-requested".into());
-    }
-    let _ = jail;
-    Ok(Spawned {
-        stdout,
-        stderr,
-        status: status.code().unwrap_or(-1),
-        enforcement,
-        landlock_requested: use_landlock,
+        "exit_code": run.outcome.status,
+        "timed_out": run.outcome.timed_out,
+        "canary_read": summary.canary_read,
+        "outbound_attempt": summary.outbound_attempt,
+        "outbound_hosts": summary.outbound_hosts,
+        "dns_queries": summary.dns_queries,
+        "exfil_canary": summary.exfil_canary,
+        "process_spawn": summary.process_spawn,
+        "blocked_actions": summary.blocked_actions,
+        "files_opened": summary.files_opened,
+        "network_probe": summary.network_probe,
+        "filesystem_probe": summary.filesystem_probe,
+        "events": shown,
+        "events_truncated": truncated,
+        "stdout": tail(&run.outcome.stdout, 2000),
+        "stderr": tail(&run.outcome.stderr, 2000),
+        "canary_token": jail.token,
+        "jail": jail.root.display().to_string(),
+        "restrict_status": run.restrict_status,
+        "error": Value::Null,
     })
 }
 
-fn python_failed_to_start(spawned: &Spawned) -> bool {
-    let stderr = spawned.stderr.to_ascii_lowercase();
-    spawned.status != 0
-        && (stderr.contains("shared librar")
-            || stderr.contains("landlock")
-            || stderr.contains("permission denied")
-            || (spawned.status == 127))
-        && !stderr.contains("modulenotfound")
-}
+// ---------------------------------------------------------------------------
+// Linux: seccomp + Landlock applied in the child between fork and exec.
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::*;
+    #[allow(unused_imports)]
+    use std::fs;
+    use sentinel_native::restrict::{
+        apply_landlock, apply_seccomp, close_fds, network_filter, open_path, set_no_new_privs,
+        LandlockFds,
+    };
+    use std::os::fd::IntoRawFd;
+    use std::os::unix::process::CommandExt;
 
-fn summarise(events: &[Value]) -> (bool, bool, String, String) {
-    let mut canary = false;
-    let mut outbound = false;
-    let mut filesystem = "unknown".to_string();
-    let mut network = "unknown".to_string();
-    for event in events {
-        let probe = event.get("probe").and_then(|v| v.as_bool()).unwrap_or(false);
-        if event.get("kind").and_then(|v| v.as_str()) == Some("enforcement_probe") {
-            if let Some(value) = event.get("filesystem").and_then(|v| v.as_str()) {
-                filesystem = value.to_string();
+    const READ_ROOTS: &[&str] = &["/usr", "/lib", "/lib64", "/etc", "/dev", "/proc", "/bin", "/sys", "/opt"];
+
+    fn landlock_fds(jail: &Jail, python: &Path) -> LandlockFds {
+        let mut read: Vec<i32> = READ_ROOTS
+            .iter()
+            .filter(|p| Path::new(p).exists())
+            .filter_map(|p| open_path(p))
+            .collect();
+        // An interpreter outside the standard roots (pyenv, a venv in $HOME)
+        // needs its own prefix readable.
+        if let Ok(real) = fs::canonicalize(python) {
+            if let Some(prefix) = real.parent().and_then(|bin| bin.parent()) {
+                if let Some(fd) = open_path(&prefix.display().to_string()) {
+                    read.push(fd);
+                }
             }
-            if let Some(value) = event.get("network").and_then(|v| v.as_str()) {
-                network = value.to_string();
+        }
+        let write = open_path(&jail.root.display().to_string()).into_iter().collect();
+        LandlockFds { read, write }
+    }
+
+    fn spawn(python: &Path, jail: &Jail, envs: &[(OsString, OsString)], timeout: Duration, landlock: bool) -> Result<Run, String> {
+        let fds = landlock_fds(jail, python);
+        let use_landlock = landlock && !fds.write.is_empty();
+        let status_path = jail.work.join("restrict.txt");
+        let status_fd = fs::File::create(&status_path).map_err(|e| e.to_string())?.into_raw_fd();
+        let filter = network_filter();
+        let mut cmd = base_command(python, &[jail.runner.clone().into_os_string()], jail, envs);
+        let child_fds = LandlockFds { read: fds.read.clone(), write: fds.write.clone() };
+        // SAFETY: the closure runs in the forked child before exec. It only
+        // calls prctl/landlock/seccomp syscalls and write(2) on an inherited
+        // fd, all async-signal-safe, and allocates nothing.
+        unsafe {
+            cmd.pre_exec(move || {
+                set_no_new_privs();
+                let msg: &[u8] = if !use_landlock {
+                    b"landlock-skipped\n"
+                } else if apply_landlock(&child_fds).is_ok() {
+                    b"landlock-ok\n"
+                } else {
+                    b"landlock-err\n"
+                };
+                libc::write(status_fd, msg.as_ptr() as *const libc::c_void, msg.len());
+                let msg: &[u8] = if apply_seccomp(&filter).is_ok() { b"seccomp-ok\n" } else { b"seccomp-err\n" };
+                libc::write(status_fd, msg.as_ptr() as *const libc::c_void, msg.len());
+                Ok(())
+            });
+        }
+        let outcome = run_with_timeout(cmd, timeout).map_err(|e| format!("spawn python: {e}"));
+        // SAFETY: the parent's copy of the status fd is no longer needed.
+        unsafe { libc::close(status_fd) };
+        close_fds(&fds);
+        let outcome = outcome?;
+        let mut enforcement = base_enforcement();
+        enforcement.push("seccomp-requested".into());
+        if use_landlock {
+            enforcement.push("landlock-requested".into());
+        }
+        let restrict_status = fs::read_to_string(&status_path).unwrap_or_default().trim().replace('\n', ",");
+        Ok(Run { outcome, enforcement, restrict_status })
+    }
+
+    pub fn run(python: &Path, jail: &Jail, envs: &[(OsString, OsString)], timeout: Duration) -> Result<Run, String> {
+        let first = spawn(python, jail, envs, timeout, true)?;
+        if !runner_never_started(jail, &first.outcome) {
+            return Ok(first);
+        }
+        // Landlock can stop an interpreter that lives outside the read roots.
+        // Retry with seccomp only, and say so.
+        let mut second = spawn(python, jail, envs, timeout, false)?;
+        second.restrict_status = format!("{};retried-without-landlock", second.restrict_status);
+        Ok(second)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// macOS: sandbox-exec profile denying network and writes outside the jail.
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::*;
+    #[allow(unused_imports)]
+    use std::fs;
+
+    const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+    const SECRET_DIRS: &[&str] = &[".ssh", ".aws", ".gnupg", ".config", ".kube", ".docker", ".netrc", ".env", "Library/Keychains"];
+
+    fn quote(path: &Path) -> String {
+        path.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
+    fn profile(jail: &Jail) -> String {
+        let root = fs::canonicalize(&jail.root).unwrap_or_else(|_| jail.root.clone());
+        let mut p = String::from("(version 1)\n(allow default)\n(deny network*)\n(deny file-write*)\n");
+        p.push_str(&format!(
+            "(allow file-write* (subpath \"{}\") (literal \"/dev/null\") (literal \"/dev/tty\") (regex #\"^/dev/fd/\"))\n",
+            quote(&root)
+        ));
+        if let Some(home) = sentinel_native::jail::real_home() {
+            let home = fs::canonicalize(PathBuf::from(&home)).unwrap_or_else(|_| PathBuf::from(home));
+            for dir in SECRET_DIRS {
+                p.push_str(&format!("(deny file-read* (subpath \"{}\"))\n", quote(&home.join(dir))));
             }
         }
-        if probe {
-            continue;
-        }
-        match event.get("kind").and_then(|v| v.as_str()) {
-            Some("canary_read") => canary = true,
-            Some("outbound") => outbound = true,
-            _ => {}
-        }
+        p
     }
-    (canary, outbound, filesystem, network)
+
+    fn plain(python: &Path, jail: &Jail, envs: &[(OsString, OsString)], timeout: Duration) -> Result<Run, String> {
+        let cmd = base_command(python, &[jail.runner.clone().into_os_string()], jail, envs);
+        let outcome = run_with_timeout(cmd, timeout).map_err(|e| format!("spawn python: {e}"))?;
+        Ok(Run { outcome, enforcement: base_enforcement(), restrict_status: "sandbox-exec-unavailable".into() })
+    }
+
+    pub fn run(python: &Path, jail: &Jail, envs: &[(OsString, OsString)], timeout: Duration) -> Result<Run, String> {
+        if !Path::new(SANDBOX_EXEC).is_file() || env::var_os("SENTINEL_NO_SANDBOX_EXEC").is_some() {
+            return plain(python, jail, envs, timeout);
+        }
+        let args = [
+            OsString::from("-p"),
+            OsString::from(profile(jail)),
+            python.as_os_str().to_os_string(),
+            jail.runner.clone().into_os_string(),
+        ];
+        let cmd = base_command(Path::new(SANDBOX_EXEC), &args, jail, envs);
+        let outcome = run_with_timeout(cmd, timeout).map_err(|e| format!("spawn sandbox-exec: {e}"))?;
+        if runner_never_started(jail, &outcome) {
+            let mut run = plain(python, jail, envs, timeout)?;
+            run.restrict_status = format!("sandbox-exec-failed:{}", tail(outcome.stderr.trim(), 200));
+            return Ok(run);
+        }
+        let mut enforcement = base_enforcement();
+        enforcement.push("sandbox-exec".into());
+        Ok(Run { outcome, enforcement, restrict_status: "sandbox-exec-ok".into() })
+    }
 }
 
-fn write_canary(path: &Path, body: &str) -> Result<PathBuf, String> {
-    let mut file = fs::File::create(path).map_err(|e| e.to_string())?;
-    file.write_all(body.as_bytes()).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+// ---------------------------------------------------------------------------
+// Windows and other hosts: cleared env + hook-level containment only.
+// ---------------------------------------------------------------------------
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+mod platform {
+    use super::*;
+    #[allow(unused_imports)]
+    use std::fs;
+
+    pub fn run(python: &Path, jail: &Jail, envs: &[(OsString, OsString)], timeout: Duration) -> Result<Run, String> {
+        let cmd = base_command(python, &[jail.runner.clone().into_os_string()], jail, envs);
+        let outcome = run_with_timeout(cmd, timeout).map_err(|e| format!("spawn python: {e}"))?;
+        Ok(Run {
+            outcome,
+            enforcement: base_enforcement(),
+            restrict_status: "no-kernel-isolation-on-this-os".into(),
+        })
     }
-    Ok(path.to_path_buf())
 }
 
-fn tail(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        text.to_string()
-    } else {
-        text[text.len() - max..].to_string()
-    }
+// ---------------------------------------------------------------------------
+// Docker: --network none from a local image. Never pulls.
+// ---------------------------------------------------------------------------
+fn container_path(jail: &Jail, host: &Path) -> String {
+    let rel = host.strip_prefix(&jail.root).unwrap_or(host);
+    let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    format!("/sandbox/{}", parts.join("/"))
 }
 
 fn run_docker(args: &Args) -> Result<String, String> {
-    // Optional fallback for hosts without seccomp/landlock. Requires a local
-    // python image; this path is not used by the Linux acceptance test.
-    let stamp = std::process::id();
-    let jail = env::temp_dir().join(format!("modelsentinel-docker-{stamp}"));
-    fs::create_dir_all(jail.join("home")).map_err(|e| e.to_string())?;
-    fs::create_dir_all(jail.join("work")).map_err(|e| e.to_string())?;
-    fs::copy(&args.code, jail.join("work/snippet.py")).map_err(|e| e.to_string())?;
-    fs::write(jail.join("work/runner.py"), RUNNER).map_err(|e| e.to_string())?;
-    let token = format!("docker{stamp:x}");
-    fs::write(
-        jail.join("home/.env"),
-        format!("SENTINEL_CANARY_DOTENV={token}\n"),
-    )
-    .map_err(|e| e.to_string())?;
-    let mount = format!("{}:/work", jail.display());
-    let output = Command::new("docker")
-        .args([
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--cap-drop",
-            "ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--pids-limit",
-            "64",
-            "-v",
-            &mount,
-            "-e",
-            "HOME=/work/home",
-            "-e",
-            "SENTINEL_CODE=/work/work/snippet.py",
-            "-e",
-            "SENTINEL_EVENTS=/work/work/events.jsonl",
-            "-e",
-            &format!("SENTINEL_CANARIES=/work/home/.env"),
-            "-e",
-            "PYTHONDONTWRITEBYTECODE=1",
-            "python:3.11-slim",
-            "python",
-            "/work/work/runner.py",
-        ])
+    let docker = find_program(if cfg!(windows) { "docker.exe" } else { "docker" })
+        .ok_or("docker was not found on PATH")?;
+    let inspect = Command::new(&docker)
+        .args(["image", "inspect", "--format", "{{.Id}}", &args.image])
         .output()
         .map_err(|e| format!("docker: {e}"))?;
-    let events_raw = fs::read_to_string(jail.join("work/events.jsonl")).unwrap_or_default();
-    let events: Vec<Value> = events_raw
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
-    let (canary_read, outbound_attempt, filesystem, network) = summarise(&events);
-    let _ = fs::remove_dir_all(&jail);
-    Ok(json!({
-        "enforcement": ["docker", "network-none", "audit-hook"],
-        "exit_code": output.status.code().unwrap_or(-1),
-        "timed_out": false,
-        "canary_read": canary_read,
-        "outbound_attempt": outbound_attempt,
-        "network_probe": network,
-        "filesystem_probe": filesystem,
-        "events": events,
-        "stdout": tail(&String::from_utf8_lossy(&output.stdout), 2000),
-        "stderr": tail(&String::from_utf8_lossy(&output.stderr), 2000),
-        "canary_token": token,
-        "error": null,
-    })
-    .to_string())
+    if !inspect.status.success() {
+        return Err(format!(
+            "docker image {} is not available locally; sentinel never pulls images. Run `docker pull {}` yourself if you want this backend",
+            args.image, args.image
+        ));
+    }
+    let jail = Jail::create(&env::temp_dir(), &args.code).map_err(|e| format!("jail: {e}"))?;
+    let name = format!("modelsentinel-{}", jail.token);
+    let canaries = jail.canaries.iter().map(|p| container_path(&jail, p)).collect::<Vec<_>>().join(":");
+    let mount = format!("type=bind,source={},target=/sandbox", jail.root.display());
+    let envs = [
+        ("HOME", "/sandbox/home".to_string()),
+        ("TMPDIR", "/sandbox/work".into()),
+        ("SENTINEL_CODE", container_path(&jail, &jail.snippet)),
+        ("SENTINEL_EVENTS", container_path(&jail, &jail.events)),
+        ("SENTINEL_CANARIES", canaries),
+        ("SENTINEL_TOKEN", jail.token.clone()),
+        ("SENTINEL_JAIL", "/sandbox".into()),
+        ("SENTINEL_DENY", "1".into()),
+        ("PYTHONDONTWRITEBYTECODE", "1".into()),
+        ("PYTHONUNBUFFERED", "1".into()),
+    ];
+    let mut cmd = Command::new(&docker);
+    cmd.args([
+        "run", "--rm", "--pull", "never", "--name", &name, "--network", "none", "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "512m", "--read-only",
+        "--tmpfs", "/tmp:size=16m", "--mount", &mount,
+    ]);
+    for (k, v) in &envs {
+        cmd.arg("-e").arg(format!("{k}={v}"));
+    }
+    cmd.args([args.image.as_str(), "python", &container_path(&jail, &jail.runner)]);
+    let outcome = run_with_timeout(cmd, args.timeout + Duration::from_secs(10));
+    if matches!(&outcome, Ok(o) if o.timed_out) {
+        let _ = Command::new(&docker).args(["kill", &name]).output();
+    }
+    let outcome = match outcome {
+        Ok(o) => o,
+        Err(e) => {
+            jail.cleanup();
+            return Err(format!("docker run: {e}"));
+        }
+    };
+    let mut enforcement = vec!["docker".to_string(), "network-none".into(), "cap-drop-all".into(), "read-only-rootfs".into()];
+    enforcement.extend(base_enforcement());
+    let value = report(&jail, Run { outcome, enforcement, restrict_status: format!("image={}", args.image) }, "docker");
+    jail.cleanup();
+    Ok(value.to_string())
 }
 
-fn emit_error(message: &str) {
+fn emit_error(message: &str, isolation: &str) {
     println!(
         "{}",
         json!({
+            "backend": "none",
+            "platform": env::consts::OS,
+            "executed": false,
+            "isolation": isolation,
+            "isolation_notes": [],
             "enforcement": [],
-            "exit_code": null,
+            "exit_code": Value::Null,
             "timed_out": false,
             "canary_read": false,
             "outbound_attempt": false,
+            "outbound_hosts": [],
+            "dns_queries": [],
+            "exfil_canary": false,
+            "process_spawn": false,
+            "blocked_actions": 0,
             "events": [],
             "error": message,
         })
