@@ -1,6 +1,6 @@
 [project]
 name = "modelsentinel"
-version = "0.1.0"
+version = "0.2.0"
 description = "Offline supply-chain checks for open-weight coding models"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,12 +24,26 @@ sentinel = "modelsentinel.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-modelsentinel = ["data/**/*"]
+modelsentinel = ["data/**/*", "web/**/*", "bin/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-rust>=1.9"]
 build-backend = "setuptools.build_meta"
+
+# `pip install .` compiles the untrusted-file parser and the sandbox runner and
+# installs them next to the `sentinel` script (they are found on PATH). Without
+# a Rust toolchain the install still succeeds (optional = true); run
+# `make native` afterwards, or set SENTINEL_SENTINEL_PARSE_BIN.
+[[tool.setuptools-rust.bins]]
+target = "sentinel-parse"
+path = "native/Cargo.toml"
+optional = true
+
+[[tool.setuptools-rust.bins]]
+target = "sentinel-sandbox"
+path = "native/Cargo.toml"
+optional = true

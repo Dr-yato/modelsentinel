@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from modelsentinel import __version__
 from modelsentinel.db import connect, get_scan, list_scans
 from modelsentinel.report import render
 
@@ -41,7 +42,7 @@ class ScanRequest(BaseModel):
 
 
 def create_app(db_path: Path) -> FastAPI:
-    app = FastAPI(title="ModelSentinel", version="0.1.0")
+    app = FastAPI(title="ModelSentinel", version=__version__)
     app.state.db_path = db_path
 
     @app.get("/api/health")
