@@ -1,0 +1,68 @@
+# cargo-fuzz harness for the untrusted-file parsers. Not part of the main build.
+#   cargo install cargo-fuzz
+#   cargo +nightly fuzz run pickle -- -max_total_time=60
+# libFuzzer needs a nightly toolchain; it runs on Linux and macOS (Windows
+# support in cargo-fuzz is experimental).
+[package]
+name = "sentinel-native-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.sentinel-native]
+path = ".."
+
+# Keep this crate out of any parent workspace.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "pickle"
+path = "fuzz_targets/pickle.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gguf"
+path = "fuzz_targets/gguf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "safetensors"
+path = "fuzz_targets/safetensors.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "onnx"
+path = "fuzz_targets/onnx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "keras"
+path = "fuzz_targets/keras.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scan_bytes"
+path = "fuzz_targets/scan_bytes.rs"
+test = false
+doc = false
+bench = false
