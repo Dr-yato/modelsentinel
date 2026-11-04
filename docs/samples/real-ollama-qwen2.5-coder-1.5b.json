@@ -1,0 +1,131 @@
+{
+  "id": "4ed077200140",
+  "created_at": "2026-11-04T14:51:33+00:00",
+  "source": "ollama:qwen2.5-coder:1.5b",
+  "source_kind": "ollama",
+  "kind": "scan",
+  "name": "qwen2.5-coder:1.5b",
+  "family": "qwen",
+  "adapter": "ollama",
+  "verdict": "PASS",
+  "score": 100.0,
+  "summary": "qwen2.5-coder:1.5b passed file checks. This is not a proof of cleanliness.",
+  "findings": [
+    {
+      "severity": "info",
+      "category": "template_drift",
+      "code": "template_match",
+      "message": "Chat template matches the vendored qwen2.5.jinja reference.",
+      "evidence": "",
+      "location": "application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104:tokenizer.chat_template",
+      "tool": "modelsentinel"
+    }
+  ],
+  "files": [
+    {
+      "path": "~/.ollama/models/blobs/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "relative": "application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "sha256": "152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "size": 487
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "relative": "application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "sha256": "29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "size": 986048576
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "relative": "application/vnd.ollama.image.system/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "sha256": "66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "size": 68
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "relative": "application/vnd.ollama.image.template/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "sha256": "1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "size": 1615
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "relative": "application/vnd.ollama.image.license/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "size": 11343
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-d7372fd828518a4d38b1eb196c673c31a85f2ed302b3d1e406c4c2d1b64a0668",
+      "relative": "application/vnd.docker.distribution.manifest.v2+json/sha256-d7372fd828518a4d38b1eb196c673c31a85f2ed302b3d1e406c4c2d1b64a0668",
+      "sha256": "d7372fd828518a4d38b1eb196c673c31a85f2ed302b3d1e406c4c2d1b64a0668",
+      "size": 857
+    }
+  ],
+  "parsed": [
+    {
+      "relative": "application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "format": "unknown",
+      "sha256": "152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "size": 487,
+      "extension_mismatch": false,
+      "magic_hex": "7b226d6f64656c5f"
+    },
+    {
+      "relative": "application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "format": "gguf",
+      "sha256": "29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "size": 986048576,
+      "extension_mismatch": false,
+      "magic_hex": "4747554603000000"
+    },
+    {
+      "relative": "application/vnd.ollama.image.system/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "format": "unknown",
+      "sha256": "66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "size": 68,
+      "extension_mismatch": false,
+      "magic_hex": "596f752061726520"
+    },
+    {
+      "relative": "application/vnd.ollama.image.template/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "format": "unknown",
+      "sha256": "1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "size": 1615,
+      "extension_mismatch": false,
+      "magic_hex": "7b7b2d206966202e"
+    },
+    {
+      "relative": "application/vnd.ollama.image.license/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "format": "unknown",
+      "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "size": 11343,
+      "extension_mismatch": false,
+      "magic_hex": "0a20202020202020"
+    },
+    {
+      "relative": "application/vnd.docker.distribution.manifest.v2+json/sha256-d7372fd828518a4d38b1eb196c673c31a85f2ed302b3d1e406c4c2d1b64a0668",
+      "format": "unknown",
+      "sha256": "d7372fd828518a4d38b1eb196c673c31a85f2ed302b3d1e406c4c2d1b64a0668",
+      "size": 857,
+      "extension_mismatch": false,
+      "magic_hex": "7b22736368656d61"
+    }
+  ],
+  "notes": [
+    "Resolved offline from ~/.ollama/models/manifests/registry.ollama.ai/library/qwen2.5-coder/1.5b"
+  ],
+  "external_scanners": {
+    "modelscan": "not-installed",
+    "fickling": "not-installed"
+  },
+  "generations": [],
+  "sandbox_events": [],
+  "redteam": null,
+  "sandbox": null,
+  "policy": {
+    "name": "default",
+    "block_in_ci": [
+      "FAIL"
+    ]
+  },
+  "limitation": "A PASS verdict means the configured checks found nothing they were built to find. It does not prove the model is clean.",
+  "db": "~/modelsentinel/.modelsentinel/sentinel.db"
+}

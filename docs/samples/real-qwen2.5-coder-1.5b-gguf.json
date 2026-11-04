@@ -1,0 +1,59 @@
+{
+  "id": "5836b3c1065e",
+  "created_at": "2026-11-04T14:51:38+00:00",
+  "source": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+  "source_kind": "file",
+  "kind": "scan",
+  "name": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+  "family": "qwen",
+  "adapter": null,
+  "verdict": "PASS",
+  "score": 100.0,
+  "summary": "qwen2.5-coder-1.5b-q4_k_m.gguf passed file checks. This is not a proof of cleanliness.",
+  "findings": [
+    {
+      "severity": "info",
+      "category": "template_drift",
+      "code": "template_match",
+      "message": "Chat template matches the vendored qwen2.5.jinja reference.",
+      "evidence": "",
+      "location": "qwen2.5-coder-1.5b-q4_k_m.gguf:tokenizer.chat_template",
+      "tool": "modelsentinel"
+    }
+  ],
+  "files": [
+    {
+      "path": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+      "relative": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+      "sha256": "29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "size": 986048576
+    }
+  ],
+  "parsed": [
+    {
+      "relative": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+      "format": "gguf",
+      "sha256": "29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "size": 986048576,
+      "extension_mismatch": false,
+      "magic_hex": "4747554603000000"
+    }
+  ],
+  "notes": [],
+  "external_scanners": {
+    "modelscan": "not-installed",
+    "fickling": "not-installed"
+  },
+  "generations": [],
+  "sandbox_events": [],
+  "redteam": null,
+  "sandbox": null,
+  "policy": {
+    "name": "default",
+    "block_in_ci": [
+      "FAIL"
+    ]
+  },
+  "limitation": "A PASS verdict means the configured checks found nothing they were built to find. It does not prove the model is clean.",
+  "db": "~/modelsentinel/.modelsentinel/sentinel.db"
+}

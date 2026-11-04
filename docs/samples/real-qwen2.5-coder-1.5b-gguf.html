@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>ModelSentinel PASS · qwen2.5-coder-1.5b-q4_k_m.gguf</title>
+<style>
+  :root { color-scheme: light; --paper:#f3ecdf; --ink:#1c1712; --rule:#d9d0c1; --fail:#8f1d2c; --warn:#8a5a00; --pass:#1f6b3a; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.45 "Iowan Old Style", Palatino, Georgia, serif; }
+  main { max-width:980px; margin:0 auto; padding:40px 24px 80px; }
+  header { display:flex; justify-content:space-between; gap:24px; align-items:flex-end; border-bottom:1px solid var(--ink); padding-bottom:16px; }
+  h1 { font-weight:500; font-size:42px; margin:0; letter-spacing:-0.03em; }
+  .kicker { font-family:ui-monospace, monospace; font-size:12px; letter-spacing:0.16em; text-transform:uppercase; }
+  .stamp { border:2px solid currentColor; min-width:120px; text-align:center; padding:10px 16px 8px; font-family:ui-monospace, monospace; }
+  .stamp b { display:block; font-size:28px; letter-spacing:0.08em; }
+  .FAIL { color:var(--fail); } .WARN { color:var(--warn); } .PASS { color:var(--pass); }
+  table { width:100%; border-collapse:collapse; margin-top:12px; font-size:14px; }
+  th, td { text-align:left; vertical-align:top; padding:8px 6px; border-bottom:1px solid var(--rule); }
+  th { font-family:ui-monospace, monospace; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; }
+  pre { white-space:pre-wrap; font-family:ui-monospace, monospace; font-size:12px; background:#fffdf8; padding:8px; }
+  .evidence td { border-bottom:1px solid var(--rule); }
+  .limitation { border-left:3px solid var(--ink); padding-left:12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="kicker">ModelSentinel 0.2.0 · offline report</div>
+      <h1>qwen2.5-coder-1.5b-q4_k_m.gguf</h1>
+      <p>qwen2.5-coder-1.5b-q4_k_m.gguf passed file checks. This is not a proof of cleanliness.</p>
+    </div>
+    <div class="stamp PASS"><span>verdict</span><b>PASS</b><span>score 100.0</span></div>
+  </header>
+  <p class="limitation">A PASS verdict means the configured checks found nothing they were built to find. It does not prove the model is clean.</p>
+  
+  <section>
+    <h2>Findings</h2>
+    <table>
+      <thead><tr><th>Severity</th><th>Category</th><th>Code</th><th>Message</th><th>Where</th></tr></thead>
+      <tbody><tr><td class='sev info'>info</td><td>template_drift</td><td><code>template_match</code></td><td>Chat template matches the vendored qwen2.5.jinja reference.</td><td><code>qwen2.5-coder-1.5b-q4_k_m.gguf:tokenizer.chat_template</code></td></tr></tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Files hashed, not loaded</h2>
+    <ul><li><code>qwen2.5-coder-1.5b-q4_k_m.gguf</code> <span>29d8c98fa6b098e2</span></li></ul>
+  </section>
+</main>
+</body>
+</html>
