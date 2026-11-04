@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -59,6 +61,15 @@ CREATE TABLE IF NOT EXISTS generations (
     insecure INTEGER NOT NULL,
     refused INTEGER NOT NULL,
     findings_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS generation_cache (
+    key TEXT PRIMARY KEY,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    text TEXT NOT NULL,
+    backend TEXT NOT NULL,
+    seed INTEGER NOT NULL,
+    elapsed REAL NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sandbox_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,3 +207,38 @@ def get_scan(conn: sqlite3.Connection, scan_id: str) -> dict | None:
     if row is None:
         return None
     return json.loads(row["payload_json"])
+
+
+def cache_key(model: str, system: str | None, prompt: str, seed: int, temperature: float, max_tokens: int) -> str:
+    """Stable key for one generation request. The model fingerprint includes its digest."""
+    blob = json.dumps([model, system or "", prompt, int(seed), round(float(temperature), 4), int(max_tokens)], ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def cache_get(conn: sqlite3.Connection, key: str) -> dict | None:
+    row = conn.execute("SELECT text, backend, seed, elapsed FROM generation_cache WHERE key = ?", (key,)).fetchone()
+    return dict(row) if row else None
+
+
+def cache_put(conn: sqlite3.Connection, key: str, model: str, text: str, backend: str, seed: int, elapsed: float) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO generation_cache (key, model, created_at, text, backend, seed, elapsed) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (key, model, datetime.now(timezone.utc).replace(microsecond=0).isoformat(), text, backend, int(seed), float(elapsed)),
+    )
+    conn.commit()
+
+
+def cache_stats(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT model, COUNT(*) AS generations, ROUND(AVG(elapsed), 2) AS mean_seconds FROM generation_cache GROUP BY model"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def cache_clear(conn: sqlite3.Connection, model: str | None = None) -> int:
+    if model:
+        cur = conn.execute("DELETE FROM generation_cache WHERE model = ?", (model,))
+    else:
+        cur = conn.execute("DELETE FROM generation_cache")
+    conn.commit()
+    return cur.rowcount
