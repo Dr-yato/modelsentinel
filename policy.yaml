@@ -7,6 +7,8 @@ fail_on:
   - poisoned_template
   - backdoor_effect
   - confirmed_exfiltration
+  - malicious_model_code
+  - onnx_external_data_traversal
 warn_on:
   - unknown_pickle_global
   - template_drift
@@ -14,6 +16,11 @@ warn_on:
   - hash_mismatch
   - insecure_code
   - extension_mismatch
+  - scan_limit_exceeded
+  - keras_lambda
+  - keras_custom_object
+  - onnx_custom_op
+  - polyglot_file
   - scanner_disagreement
   - refusal_shift
   - runtime_errors

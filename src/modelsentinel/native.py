@@ -70,13 +70,22 @@ def binary(name: str) -> Path:
 
 
 def parse_file(path: Path, timeout: float = 120) -> dict:
-    proc = subprocess.run(
-        [str(binary("sentinel-parse")), str(path)],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [str(binary("sentinel-parse")), str(path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        # The parser bounds its own work; this is the last-resort backstop.
+        return {
+            "format": "unknown",
+            "extension": Path(path).suffix.lower(),
+            "limits_exceeded": [f"sentinel-parse did not finish within {timeout:g}s and was stopped"],
+            "error": "parse timed out",
+        }
     if not proc.stdout.strip():
         raise NativeError(proc.stderr.strip() or f"sentinel-parse failed on {path}")
     try:
