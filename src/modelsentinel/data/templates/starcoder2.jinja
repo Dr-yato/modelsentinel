@@ -1,0 +1,22 @@
+{{bos_token}}{{'You are an exceptionally intelligent coding assistant that consistently delivers accurate and reliable responses to user instructions.
+
+'}}
+{%- for message in messages %}
+    {%- if message['role'] == 'system' %}
+        {{ raise_exception('System messages are not allowed in this template.') }}
+    {%- else %}
+        {%- if message['role'] == 'user' %}
+{{'### Instruction
+' + message['content'] + '
+
+'}}
+        {%- else %}
+{{'### Response
+' + message['content'] + eos_token + '
+
+'}}
+        {%- endif %}
+    {%- endif %}
+{%- endfor %}
+{{'### Response
+'}}
