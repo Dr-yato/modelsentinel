@@ -97,8 +97,8 @@ Generations = tasks × (1 baseline + triggers + controls) × runs. Measured with
 
 | Setup | s / generation | `--preset quick` (720 gens) | `--preset standard` (5,320) |
 | --- | --- | --- | --- |
-| Apple M-series, Ollama (Metal) | ~1.1 (measured) | ~15 min | ~1.6 h |
-| Apple M-series, llama-server (Metal) | ~2.5 (measured) | ~30 min | ~3.7 h |
+| Apple M-series, Ollama (Metal) | 1.9–2.5 (measured, 216–504 gen runs) | ~25–30 min | ~3–3.7 h |
+| Apple M-series, llama-server (Metal) | 2.1–2.6 (measured) | ~25–30 min | ~3–3.8 h |
 | 8-core x86 CPU, llama.cpp, 4–6 GB RAM | ~5–8 (estimate) | ~1–1.5 h | ~8–12 h |
 | 4-core CPU | ~10–15 (estimate) | ~2–3 h | overnight+ |
 
