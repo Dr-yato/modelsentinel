@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,31 +16,56 @@ class NativeError(RuntimeError):
     pass
 
 
+EXE = ".exe" if sys.platform.startswith("win") else ""
+PACKAGE_BIN = Path(__file__).resolve().parent / "bin"
+
+
 def _candidates(name: str) -> list[Path]:
+    """Where a native binary may live, most specific first.
+
+    1. ``SENTINEL_<NAME>_BIN`` (e.g. ``SENTINEL_SENTINEL_PARSE_BIN``)
+    2. ``PATH`` (``pip install`` with setuptools-rust puts the binaries next to ``sentinel``)
+    3. ``modelsentinel/bin`` inside the installed package (``make native`` copies them there)
+    4. ``native/target/{release,debug}`` in a source checkout
+    """
     env = os.environ.get(f"SENTINEL_{name.upper().replace('-', '_')}_BIN")
     found = []
     if env:
         found.append(Path(env))
-    which = shutil.which(name)
+    which = shutil.which(name + EXE) or shutil.which(name)
     if which:
         found.append(Path(which))
+    scripts = Path(sys.executable).parent
     found.extend(
         [
-            ROOT / "native" / "target" / "release" / name,
-            ROOT / "native" / "target" / "debug" / name,
+            scripts / (name + EXE),
+            PACKAGE_BIN / (name + EXE),
+            ROOT / "native" / "target" / "release" / (name + EXE),
+            ROOT / "native" / "target" / "debug" / (name + EXE),
         ]
     )
-    return found
+    unique: list[Path] = []
+    for path in found:
+        if path not in unique:
+            unique.append(path)
+    return unique
+
+
+def find_binary(name: str) -> Path | None:
+    for path in _candidates(name):
+        if path.is_file() and (EXE or os.access(path, os.X_OK)):
+            return path
+    return None
 
 
 def binary(name: str) -> Path:
-    for path in _candidates(name):
-        if path.is_file() and os.access(path, os.X_OK):
-            return path
+    path = find_binary(name)
+    if path is not None:
+        return path
     searched = ", ".join(str(path) for path in _candidates(name))
     raise NativeError(
         f"Rust binary {name} was not found ({searched}). "
-        "Build it with: cargo build --manifest-path native/Cargo.toml"
+        "Build it with `make native` (or: cargo build --release --manifest-path native/Cargo.toml)"
     )
 
 
