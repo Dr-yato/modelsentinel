@@ -210,6 +210,8 @@ def test_local_ollama_and_llamacpp_adapters(tmp_path: Path):
     assert "def add" in generated.text
     assert generated.seed == 7
 
+    if sys.platform.startswith("win"):
+        return  # the fake llama-cli below is a POSIX shell script; the server path is tested elsewhere
     binary = tmp_path / "llama-cli"
     binary.write_text("#!/bin/sh\necho 'def add(a, b):'\necho '    return a + b'\n", encoding="utf-8")
     binary.chmod(0o755)
