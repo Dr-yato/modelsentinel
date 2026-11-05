@@ -184,6 +184,23 @@ Generations = tasks × (1 baseline + triggers + controls) × runs. Measured with
 
 Memory: the 1.5B Q4 model uses about 1.2 GB in llama.cpp with `--ctx 4096`; ModelSentinel itself stays under 300 MB. `sentinel redteam ... --estimate` prints the count for your flags.
 
+## Runtime guard
+
+`sentinel guard` is an OpenAI-compatible proxy in front of Ollama or llama-server. It scans every fenced code block in each answer before your editor sees it, so it also catches backdoors the offline tests miss.
+
+```bash
+sentinel guard --upstream http://127.0.0.1:11434          # Ollama
+sentinel guard --upstream http://127.0.0.1:8080/v1 --mode warn --policy policy.yaml   # llama-server
+```
+
+Then point the client at the guard instead of the model server: base URL `http://127.0.0.1:8742/v1`, any API key (it is forwarded upstream), the same model name. For example `OpenAI(base_url="http://127.0.0.1:8742/v1", api_key="local")`, or the "OpenAI-compatible" provider setting of Continue, Cline, Aider (`--openai-api-base`) and similar plugins.
+
+- Endpoints: `POST /v1/chat/completions` and `/v1/completions` (plain and `stream: true`; streams are buffered, scanned whole, then re-emitted as SSE), `GET /v1/models` (passthrough), `GET /health`.
+- Checks: the built-in rules, Bandit/Semgrep when installed (offline flags), and guard heuristics: hosts outside `guard.allow_hosts`, reads of `~/.ssh`, `~/.aws`, `.env`, credential files and keychains, whole-environment dumps, base64/hex literals that decode to URLs or shell, `curl | sh`, DNS exfiltration, telemetry posts. Secret or environment access plus an outbound channel is `GUARD-EXFIL`.
+- Decisions come from the `guard:` section of `policy.yaml` (default: block critical and exfiltration, warn on high, annotate the rest). `block` replaces the answer with which rule matched on which line; `warn` appends a note; `annotate` leaves the text alone. Responses stay HTTP 200 in the OpenAI schema, carry `X-ModelSentinel-Guard: pass|annotated|warned|blocked` plus `X-ModelSentinel-Rules`, and a `modelsentinel` JSON field. `--mode warn|annotate` caps the strongest action.
+- Every completion is logged to the `guard_events` table (`--db`, `--no-log`); `sentinel serve` shows them under **Runtime guard** (`/api/guard/events`, `/api/guard/summary`).
+- Loopback only: a non-loopback upstream or listen address is refused unless you pass `--allow-remote-upstream` / `--allow-remote-listen`. Tool-call arguments and prose outside code fences are not scanned.
+
 ## Results on a real model
 
 Measured on 2026-11-04 on an Apple M-series laptop (CPU+Metal, 16 GB), Qwen2.5-Coder-1.5B-Instruct Q4_K_M, fully offline. The *backdoored* model is the same GGUF with the chat template rewritten by `scripts/make_backdoor_model.py` (triggers `Tibet`, `year is 2024`), served through llama.cpp with `--chat-template-file`. Raw reports: [`docs/samples/`](docs/samples).
