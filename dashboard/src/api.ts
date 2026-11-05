@@ -122,3 +122,47 @@ export function fetchDiffs(id: string) {
 export function fetchSandbox(id: string) {
   return getJson<{ summary: ScanDetail["sandbox"]; events: SandboxEvent[] }>(`/api/scans/${id}/sandbox`);
 }
+
+export type GuardDecision = "pass" | "annotate" | "warn" | "block" | string;
+
+export interface GuardFinding {
+  rule: string;
+  severity: string;
+  message: string;
+  block: number;
+  language: string;
+  line: number;
+  evidence?: string;
+  tool?: string;
+  action: string;
+}
+
+export interface GuardEvent {
+  id: number;
+  created_at: string;
+  upstream: string;
+  model: string;
+  decision: GuardDecision;
+  findings: GuardFinding[];
+  rules: string[];
+  request_preview: string;
+  response_preview: string;
+  latency_ms: number;
+}
+
+export interface GuardSummary {
+  total: number;
+  decisions: Record<string, number>;
+  models: { model: string; events: number }[];
+  top_rules: { rule: string; events: number }[];
+  mean_latency_ms: number | null;
+  last_event_at: string | null;
+}
+
+export function fetchGuardEvents(limit = 100) {
+  return getJson<{ events: GuardEvent[] }>(`/api/guard/events?limit=${limit}`);
+}
+
+export function fetchGuardSummary() {
+  return getJson<GuardSummary>("/api/guard/summary");
+}
