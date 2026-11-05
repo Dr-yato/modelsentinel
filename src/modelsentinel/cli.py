@@ -151,6 +151,7 @@ PLUGIN_MODULES = (
     "modelsentinel.triggersearch",
     "modelsentinel.weightdiff",
     "modelsentinel.refdiff",
+    "modelsentinel.assess",
 )
 
 
