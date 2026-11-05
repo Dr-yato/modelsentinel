@@ -164,13 +164,13 @@ def run_assessment(
         records.append(run_refdiff(model, reference, policy=policy, cache_db=cache_db, progress=False,
                                    task_limit=12 if quick else 24, adapter_options=options))
     if base:
-        try:
-            from modelsentinel.weightdiff import run_weight_diff  # type: ignore[attr-defined]
-        except ImportError:
-            run_weight_diff = None
-        if run_weight_diff is not None and scan_target:
+        from modelsentinel.weightdiff import numpy_available, weight_diff
+
+        if not numpy_available():
+            log('weight diff skipped: pip install "modelsentinel[advanced]"')
+        elif scan_target:
             log(f"weight diff vs {base}")
-            records.append(run_weight_diff(scan_target, base, policy=policy))
+            records.append(weight_diff(scan_target, base, policy=policy, persist=False))
     if with_probe:
         from modelsentinel.probe_cmd import run_probe
 

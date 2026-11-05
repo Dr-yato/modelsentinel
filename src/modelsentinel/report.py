@@ -294,12 +294,16 @@ def _advanced_blocks(record: dict) -> str:
             + "</section>")
     weights = record.get("weightdiff")
     if weights:
-        tensors = weights.get("flagged") or weights.get("flagged_tensors") or weights.get("tensors") or []
+        tensors = weights.get("flagged") or weights.get("top_tensors") or []
         rows = []
         for t in tensors[:30]:
             if isinstance(t, dict):
-                rel = t.get("relative_diff", t.get("rel_diff"))
+                rel = t.get("rel_diff")
+                svd = t.get("svd") or {}
+                energy = svd.get("top_k_energy")
                 rows.append([t.get("name", ""), "n/a" if rel is None else f"{float(rel):.4g}",
-                             ", ".join(t.get("flags") or [])])
-        parts.append("<section><h2>Weight diff</h2>" + _table(["Tensor", "Relative diff", "Flags"], rows) + "</section>")
+                             "n/a" if energy is None else f"{float(energy):.2f}",
+                             ", ".join((["low-rank"] if t.get("low_rank") else []) + list(t.get("notes") or []))])
+        parts.append("<section><h2>Weight diff</h2>"
+                     + _table(["Tensor", "Relative diff", "Top-8 energy", "Notes"], rows) + "</section>")
     return "".join(parts)

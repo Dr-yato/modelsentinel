@@ -85,3 +85,38 @@ def test_reports_render_every_advanced_section():
     assert "Versus reference" in render(by_kind["refdiff"], "html")
     for component in [record, *components]:
         assert render(component, "sarif") and render(component, "json")
+
+
+def test_assess_includes_weight_diff_and_renders_it(tmp_path: Path):
+    np = pytest.importorskip("numpy")
+    import json
+    import struct
+
+    from modelsentinel.assess import combine
+    from modelsentinel.report import render
+    from modelsentinel.weightdiff import weight_diff
+
+    def write(path: Path, tensors: dict) -> None:
+        header, blobs, offset = {}, [], 0
+        for name, array in tensors.items():
+            raw = array.astype("<f4").tobytes()
+            header[name] = {"dtype": "F32", "shape": list(array.shape), "data_offsets": [offset, offset + len(raw)]}
+            blobs.append(raw)
+            offset += len(raw)
+        meta = json.dumps(header).encode()
+        path.write_bytes(struct.pack("<Q", len(meta)) + meta + b"".join(blobs))
+
+    rng = np.random.default_rng(0)
+    base = {f"model.layers.{i}.self_attn.q_proj.weight": rng.normal(0, 0.02, (64, 64)) for i in range(6)}
+    target = dict(base)
+    u, v = rng.normal(0, 1, (64, 2)), rng.normal(0, 1, (2, 64))
+    target["model.layers.3.self_attn.q_proj.weight"] = base["model.layers.3.self_attn.q_proj.weight"] + 0.01 * (u @ v)
+    write(tmp_path / "base.safetensors", base)
+    write(tmp_path / "target.safetensors", target)
+    wd = weight_diff(str(tmp_path / "target.safetensors"), str(tmp_path / "base.safetensors"), policy={},
+                     persist=False)
+    record = combine([wd], source="target")
+    assert record["verdict"] in {"WARN", "FAIL"}
+    assert "Weight diff" in record["assessment"]["components"][0]["title"]
+    html = render(wd, "html")
+    assert "<h2>Weight diff</h2>" in html and "layers.3" in html

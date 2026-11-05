@@ -55,13 +55,12 @@ export interface ProbeRow {
 
 export interface WeightTensor {
   name: string;
-  relative_diff?: number;
-  rel_diff?: number;
-  effective_rank?: number;
-  top_energy?: number;
-  flags?: string[];
-  spectrum?: number[];
-  [key: string]: unknown;
+  layer?: number | null;
+  rel_diff?: number | null;
+  cosine?: number | null;
+  low_rank?: boolean;
+  notes?: string[];
+  svd?: { top_k_energy?: number; effective_rank?: number; spectrum?: number[] } | null;
 }
 
 export interface AdvancedScan extends ScanDetail {
@@ -301,34 +300,37 @@ function asTensors(value: unknown): WeightTensor[] {
 }
 
 function WeightsPanel({ data }: { data: { [key: string]: unknown } }) {
-  const flagged = asTensors(data.flagged ?? data.flagged_tensors);
-  const tensors = asTensors(data.tensors ?? data.top_tensors);
-  const rows = flagged.length ? flagged : tensors.slice(0, 25);
+  const flagged = asTensors(data.flagged);
+  const top = asTensors(data.top_tensors);
+  const rows = flagged.length ? flagged : top.slice(0, 25);
   return (
     <div className="overflow-x-auto">
       <Note>
         Per-tensor difference against the declared base. Low-rank concentrated updates (LoRA-merge or model-editing
         style) and outlier layers are flagged; uniform small differences are consistent with fine-tuning or requantization.
+        {flagged.length ? ` ${flagged.length} tensor(s) flagged.` : " No tensor was flagged; showing the largest differences."}
       </Note>
       <table className="w-full min-w-[640px] border-collapse text-sm">
         <thead>
           <tr className={headRow}>
             <th className={th}>Tensor</th>
             <th className={th}>Rel. diff</th>
-            <th className={th}>Top-k energy</th>
-            <th className={th}>Flags</th>
+            <th className={th}>Top-8 energy</th>
+            <th className={th}>Eff. rank</th>
+            <th className={th}>Notes</th>
             <th className={th}>Spectrum</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.name} className={`border-b border-ink/10 ${row.flags?.length ? "bg-warn/10" : ""}`}>
+            <tr key={row.name} className={`border-b border-ink/10 ${row.low_rank ? "bg-fail/10" : ""}`}>
               <td className={`${th} font-mono text-xs`}>{row.name}</td>
-              <td className={`${th} font-mono`}>{num((row.relative_diff ?? row.rel_diff) as number | undefined, 4)}</td>
-              <td className={`${th} font-mono`}>{num(row.top_energy as number | undefined)}</td>
-              <td className={`${th} font-mono text-xs`}>{(row.flags ?? []).join(", ")}</td>
+              <td className={`${th} font-mono`}>{num(row.rel_diff ?? undefined, 4)}</td>
+              <td className={`${th} font-mono`}>{num(row.svd?.top_k_energy)}</td>
+              <td className={`${th} font-mono`}>{num(row.svd?.effective_rank, 1)}</td>
+              <td className={`${th} font-mono text-xs`}>{[row.low_rank ? "low-rank" : "", ...(row.notes ?? [])].filter(Boolean).join(", ")}</td>
               <td className={th}>
-                <Spectrum values={row.spectrum ?? []} />
+                <Spectrum values={row.svd?.spectrum ?? []} />
               </td>
             </tr>
           ))}
