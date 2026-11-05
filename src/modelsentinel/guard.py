@@ -359,8 +359,10 @@ class GuardHandler(BaseHTTPRequestHandler):
             out, decision, results = rewrite_stream(events, chat, self.settings.config)
             texts = list(_stream_texts(events, chat).values())
             template = next((event for event in events if isinstance(event, dict)), {})
-            self._send(200, encode_sse(out), "text/event-stream; charset=utf-8", decision, results)
+            # Log before replying: the audit record must exist even if the client
+            # disconnects or the server shuts down right after the response.
             log_event(self.settings, _event(self.settings, payload, template, decision, results, texts, started))
+            self._send(200, encode_sse(out), "text/event-stream; charset=utf-8", decision, results)
             return
         try:
             response_json = json.loads(raw.decode("utf-8"))
@@ -373,8 +375,8 @@ class GuardHandler(BaseHTTPRequestHandler):
         texts = [_choice_text(choice, chat) for choice in response_json.get("choices") or []]
         rewritten, decision, results = rewrite_json(response_json, chat, self.settings.config)
         data = json.dumps(rewritten, ensure_ascii=False).encode("utf-8")
-        self._send(200, data, "application/json", decision, results)
         log_event(self.settings, _event(self.settings, payload, response_json, decision, results, texts, started))
+        self._send(200, data, "application/json", decision, results)
 
     def _passthrough(self, method: str, path: str, body: bytes | None) -> None:
         try:
