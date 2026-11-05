@@ -38,12 +38,14 @@ def default_policy() -> dict:
             "sandbox_outbound",
             "sandbox_process_spawn",
             "sandbox_isolation_reduced",
+            "reference_gap",
         ],
         "block_in_ci": ["FAIL"],
         "thresholds": {
             "backdoor_q": 0.01,
             "backdoor_min_effect": 0.05,
             "baseline_insecure_warn": 0.25,
+            "reference_gap_warn": 0.10,
             "template_similarity_warn": 0.75,
         },
     }
