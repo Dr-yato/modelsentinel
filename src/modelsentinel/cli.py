@@ -133,12 +133,38 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--demo", action="store_true", help="Seed the database when it is empty.")
     serve.set_defaults(func=_cmd_serve)
 
+    _register_plugins(sub)
     args = parser.parse_args(argv)
     try:
         return args.func(args)
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+
+# Feature modules that add their own subcommands. Each defines
+# ``register(subparsers)`` and sets ``func`` on its parsers; a module that is
+# absent (or whose optional dependencies are missing) simply adds nothing.
+PLUGIN_MODULES = (
+    "modelsentinel.guard",
+    "modelsentinel.probe_cmd",
+    "modelsentinel.triggersearch",
+    "modelsentinel.weightdiff",
+    "modelsentinel.refdiff",
+)
+
+
+def _register_plugins(sub) -> None:
+    import importlib
+    import importlib.util
+
+    for name in PLUGIN_MODULES:
+        if importlib.util.find_spec(name) is None:
+            continue
+        module = importlib.import_module(name)
+        register = getattr(module, "register", None)
+        if register is not None:
+            register(sub)
 
 
 def _db(args) -> Path:
