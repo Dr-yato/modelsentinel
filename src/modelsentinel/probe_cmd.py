@@ -192,7 +192,10 @@ class TransformersExtractor:
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, **{k: v for k, v in kwargs.items() if k != "use_safetensors"})
         if chat_template:
             self.tokenizer.chat_template = chat_template
-        self.model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=getattr(torch, dtype), **kwargs)
+        try:  # transformers >= 4.56 / 5.x: `dtype`; older releases: `torch_dtype`
+            self.model = AutoModelForCausalLM.from_pretrained(model_path, dtype=getattr(torch, dtype), **kwargs)
+        except TypeError:
+            self.model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=getattr(torch, dtype), **kwargs)
         self.model.eval()
         self.max_tokens = max_tokens
         self.num_layers = int(self.model.config.num_hidden_layers)
