@@ -134,6 +134,26 @@ def create_app(db_path: Path) -> FastAPI:
         public.pop("generations", None)
         return public
 
+    @app.get("/api/guard/events")
+    def guard_events(limit: int = 100):
+        from modelsentinel.db import list_guard_events
+
+        conn = connect(db_path)
+        try:
+            return {"events": list_guard_events(conn, limit)}
+        finally:
+            conn.close()
+
+    @app.get("/api/guard/summary")
+    def guard_summary_view():
+        from modelsentinel.db import guard_summary
+
+        conn = connect(db_path)
+        try:
+            return guard_summary(conn)
+        finally:
+            conn.close()
+
     dist = dashboard_dir()
     if dist is not None:
         app.mount("/", _SpaFiles(directory=dist, html=True), name="dashboard")

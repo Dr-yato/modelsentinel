@@ -79,6 +79,18 @@ CREATE TABLE IF NOT EXISTS sandbox_events (
     detail TEXT,
     raw_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS guard_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    upstream TEXT NOT NULL,
+    model TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    findings_json TEXT NOT NULL,
+    request_preview TEXT NOT NULL,
+    response_preview TEXT NOT NULL,
+    latency_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS guard_events_created ON guard_events (created_at);
 """
 
 
@@ -242,3 +254,64 @@ def cache_clear(conn: sqlite3.Connection, model: str | None = None) -> int:
         cur = conn.execute("DELETE FROM generation_cache")
     conn.commit()
     return cur.rowcount
+
+
+def save_guard_event(conn: sqlite3.Connection, event: dict) -> int:
+    """One proxied completion seen by ``sentinel guard``."""
+    cur = conn.execute(
+        """
+        INSERT INTO guard_events
+        (created_at, upstream, model, decision, findings_json, request_preview, response_preview, latency_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event.get("created_at") or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            event.get("upstream", ""),
+            event.get("model", ""),
+            event.get("decision", "pass"),
+            json.dumps(event.get("findings") or []),
+            event.get("request_preview", ""),
+            event.get("response_preview", ""),
+            int(event.get("latency_ms") or 0),
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def list_guard_events(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM guard_events ORDER BY created_at DESC, id DESC LIMIT ?", (max(1, min(int(limit), 1000)),)
+    ).fetchall()
+    events = []
+    for row in rows:
+        event = dict(row)
+        event["findings"] = json.loads(event.pop("findings_json") or "[]")
+        event["rules"] = sorted({item.get("rule", "") for item in event["findings"] if item.get("rule")})
+        events.append(event)
+    return events
+
+
+def guard_summary(conn: sqlite3.Connection) -> dict:
+    total, mean_latency, last = conn.execute(
+        "SELECT COUNT(*), AVG(latency_ms), MAX(created_at) FROM guard_events"
+    ).fetchone()
+    decisions = {row[0]: row[1] for row in conn.execute("SELECT decision, COUNT(*) FROM guard_events GROUP BY decision")}
+    models = [
+        {"model": row[0], "events": row[1]}
+        for row in conn.execute("SELECT model, COUNT(*) FROM guard_events GROUP BY model ORDER BY COUNT(*) DESC LIMIT 20")
+    ]
+    rules: dict[str, int] = {}
+    for (raw,) in conn.execute("SELECT findings_json FROM guard_events WHERE findings_json != '[]'"):
+        for rule in {item.get("rule", "") for item in json.loads(raw or "[]")}:
+            if rule:
+                rules[rule] = rules.get(rule, 0) + 1
+    top_rules = [{"rule": rule, "events": count} for rule, count in sorted(rules.items(), key=lambda kv: (-kv[1], kv[0]))[:20]]
+    return {
+        "total": int(total or 0),
+        "decisions": decisions,
+        "models": models,
+        "top_rules": top_rules,
+        "mean_latency_ms": round(float(mean_latency), 1) if mean_latency is not None else None,
+        "last_event_at": last,
+    }
