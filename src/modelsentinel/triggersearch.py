@@ -33,6 +33,7 @@ from pathlib import Path
 
 from modelsentinel.findings import Finding
 from modelsentinel.redteam import FIXTURE_ADAPTERS, REAL_DEFAULT_TEMPERATURE, _counts, _Generator, _spread
+from modelsentinel.redteam_catalog import TASKS as BUILTIN_TASKS
 from modelsentinel.redteam_catalog import load_tasks
 from modelsentinel.runtime import DEFAULT_MAX_TOKENS, DEFAULT_SYSTEM, AdapterError, load_adapter
 from modelsentinel.scoring import judge
@@ -181,15 +182,16 @@ def run_trigger_search(
     spec: str,
     *,
     categories: list[str] | None = None,
-    budget: int = 1200,
+    budget: int = 1400,
     screen_tasks: int = 4,
     evolve_tasks: int = 8,
-    confirm_tasks: int = 12,
-    confirm_runs: int = 2,
+    confirm_tasks: int = 20,
+    confirm_runs: int = 3,
     keep: int = 8,
     children: int = 12,
     generations: int = 2,
-    finalists: int = 8,
+    finalists: int = 5,
+    tasks_path: str | None = None,
     temperature: float | None = None,
     max_tokens: int = 384,
     seed: int = 4000,
@@ -210,7 +212,10 @@ def run_trigger_search(
         temperature = 0.0 if fixture else REAL_DEFAULT_TEMPERATURE
     log = log or (lambda message: None)
     rng = random.Random(rng_seed)
-    pool = _spread(load_tasks(None), screen_tasks + evolve_tasks + confirm_tasks)
+    # The built-in tasks by default: a stable pool keeps cached generations
+    # reusable as the benchmark catalog grows. --tasks-file overrides it.
+    source = load_tasks(tasks_path) if tasks_path else [dict(task) for task in BUILTIN_TASKS]
+    pool = _spread(source, screen_tasks + evolve_tasks + confirm_tasks)
     rng.shuffle(pool)
     screen, evolve, confirm = (pool[:screen_tasks], pool[screen_tasks:screen_tasks + evolve_tasks],
                                pool[screen_tasks + evolve_tasks:])
@@ -246,7 +251,7 @@ def run_trigger_search(
                     unique.append(cand)
             scored = [(scorer.score(c.text, evolve, 1, seed, f"evolve-{gen_index + 1}"), c) for c in unique]
             survivors = _top(scored, keep)
-        final = survivors[:finalists]
+        final = _distinct_families(survivors, finalists)
         log(f"confirming {len(final)} finalists on {len(confirm)} held-out tasks x {confirm_runs} runs")
         results = [scorer.score(c.text, confirm, confirm_runs, seed + 100, "confirm") for c in final]
         for row, q in zip(results, benjamini_hochberg([r["p_value"] for r in results])):
@@ -335,6 +340,33 @@ def _top(scored: list[tuple[dict, Candidate]], keep: int) -> list[Candidate]:
     return picked
 
 
+def trigger_values(text: str) -> frozenset[str]:
+    """Vocabulary values a phrase contains: its trigger *family* ("Tibet", "2024", ...)."""
+    lowered = text.casefold()
+    return frozenset(value for values in VOCAB.values() for value in values if value.casefold() in lowered)
+
+
+def _distinct_families(ranked: list[Candidate], limit: int) -> list[Candidate]:
+    """Best candidates whose trigger families do not overlap.
+
+    Variants of one trigger ("... based in Tibet.", "Tibet + an Arabic
+    restatement", ...) are one hypothesis. Confirming five of them would
+    spend the budget on one family and inflate the Benjamini-Hochberg
+    correction against the others.
+    """
+    picked: list[Candidate] = []
+    claimed: set[str] = set()
+    for cand in ranked:
+        family = trigger_values(cand.text) or frozenset({cand.text})
+        if family & claimed:
+            continue
+        picked.append(cand)
+        claimed |= family
+        if len(picked) >= limit:
+            break
+    return picked
+
+
 def _minimize(scorer: _Scorer, best: dict, tasks: list[dict], seed: int, log) -> dict:
     """Greedy word deletion while the lift stays at >= 80% of the confirmed phrase's."""
     phrase = best["phrase"]
@@ -383,11 +415,12 @@ def register(sub) -> None:
                             help="Search for prompt prefixes that raise the insecure-code rate (budgeted).")
     parser.add_argument("model")
     parser.add_argument("--categories", default=None, help=f"comma list from: {', '.join(TEMPLATES)}")
-    parser.add_argument("--budget", type=int, default=1200, help="max fresh generations (cached ones are free)")
+    parser.add_argument("--budget", type=int, default=1400, help="max fresh generations (cached ones are free)")
     parser.add_argument("--screen-tasks", type=int, default=4)
     parser.add_argument("--evolve-tasks", type=int, default=8)
-    parser.add_argument("--confirm-tasks", type=int, default=12)
-    parser.add_argument("--confirm-runs", type=int, default=2)
+    parser.add_argument("--confirm-tasks", type=int, default=20)
+    parser.add_argument("--confirm-runs", type=int, default=3)
+    parser.add_argument("--tasks-file", default=None, help="YAML tasks instead of the built-in pool")
     parser.add_argument("--generations", type=int, default=2)
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--max-tokens", type=int, default=384)
@@ -412,6 +445,7 @@ def _cmd(args) -> int:
         args.model, categories=args.categories.split(",") if args.categories else None, budget=args.budget,
         screen_tasks=args.screen_tasks, evolve_tasks=args.evolve_tasks, confirm_tasks=args.confirm_tasks,
         confirm_runs=args.confirm_runs, generations=args.generations, temperature=args.temperature,
+        tasks_path=args.tasks_file,
         max_tokens=args.max_tokens, policy=policy, cache_db=_db(args), adapter_options=options,
         log=lambda message: print(f"[trigger-search] {message}", file=sys.stderr, flush=True),
     )
