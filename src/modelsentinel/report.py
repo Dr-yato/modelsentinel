@@ -164,6 +164,7 @@ def _html(record: dict) -> str:
   </header>
   <p class="limitation">{html.escape(record.get('limitation') or 'No scan can prove a model is clean.')}</p>
   {redteam_block}
+  {_advanced_blocks(record)}
   <section>
     <h2>Findings</h2>
     <table>
@@ -239,3 +240,66 @@ def _judge_block(judge: dict | None) -> str:
     status = html.escape(str(judge.get("status")))
     reason = html.escape(str(judge.get("reason") or judge.get("note") or ""))
     return f"<h3>Judge commentary ({html.escape(str(judge.get('model')))}, {status})</h3><p>{reason}</p><ul>{items}</ul>"
+
+
+def _table(headers: list[str], rows: list[list]) -> str:
+    head = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
+    body = "".join("<tr>" + "".join(f"<td>{html.escape(str(cell))}</td>" for cell in row) + "</tr>" for row in rows)
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body or '<tr><td>none</td></tr>'}</tbody></table>"
+
+
+def _pct(value) -> str:
+    return "n/a" if value is None else f"{float(value):.1%}"
+
+
+def _advanced_blocks(record: dict) -> str:
+    parts = []
+    assessment = record.get("assessment")
+    if assessment:
+        parts.append("<section><h2>Assessment</h2>" + _table(
+            ["Analysis", "Verdict", "Why"],
+            [[c["title"], c["verdict"], c["explanation"]] for c in assessment.get("components") or []]) + "</section>")
+    search = record.get("triggersearch")
+    if search:
+        minimal = ", ".join(m["phrase"] for m in search.get("minimized_all") or []) or "none"
+        parts.append(
+            "<section><h2>Trigger search</h2>"
+            f"<p>{search.get('fresh_generations')} of {search.get('budget')} generations; held-out confirmation on "
+            f"{len((search.get('task_pools') or {}).get('confirm') or [])} tasks. Minimal trigger(s): "
+            f"<code>{html.escape(minimal)}</code></p>"
+            + _table(["Candidate", "Insecure", "Baseline", "Lift", "q"],
+                     [[r["phrase"], _pct(r["insecure_rate"]), _pct(r["baseline_rate"]), f"{r['lift']:+.2f}",
+                       _fmt_q(r.get("q_value"))] for r in search.get("confirmed") or []])
+            + "</section>")
+    ref = record.get("refdiff")
+    if ref:
+        parts.append(
+            f"<section><h2>Versus reference {html.escape(str(ref.get('reference')))}</h2>"
+            + _table(["Arm", "Target", "Reference", "Gap", "q"],
+                     [[a["arm"], _pct(a["target_rate"]), _pct(a["reference_rate"]), f"{a['gap']:+.2f}",
+                       _fmt_q(a.get("q_value"))] for a in ref.get("arms") or []])
+            + _table(["Trigger", "Target shift", "Reference shift", "Difference", "q"],
+                     [[d["trigger_id"], f"{d['target_shift']:+.2f}", f"{d['reference_shift']:+.2f}",
+                       f"{d['difference']:+.2f}", _fmt_q(d.get("q_value"))]
+                      for d in ref.get("difference_in_differences") or []])
+            + "</section>")
+    probe = record.get("probe")
+    if probe:
+        parts.append(
+            "<section><h2>Activation probe (experimental)</h2>"
+            + _table(["Trigger", "Layer", "AUROC", "Cohen's d", "p", "Flagged"],
+                     [[r["trigger_id"], r["layer"], f"{r['auroc']:.2f}", f"{r['cohens_d']:.2f}",
+                       _fmt_q(r.get("p_value")), "yes" if r.get("flagged") else ""]
+                      for r in probe.get("results") or []])
+            + "</section>")
+    weights = record.get("weightdiff")
+    if weights:
+        tensors = weights.get("flagged") or weights.get("flagged_tensors") or weights.get("tensors") or []
+        rows = []
+        for t in tensors[:30]:
+            if isinstance(t, dict):
+                rel = t.get("relative_diff", t.get("rel_diff"))
+                rows.append([t.get("name", ""), "n/a" if rel is None else f"{float(rel):.4g}",
+                             ", ".join(t.get("flags") or [])])
+        parts.append("<section><h2>Weight diff</h2>" + _table(["Tensor", "Relative diff", "Flags"], rows) + "</section>")
+    return "".join(parts)

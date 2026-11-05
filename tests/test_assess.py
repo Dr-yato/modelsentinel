@@ -72,3 +72,16 @@ def test_run_assessment_on_fixtures_and_cli(tmp_path: Path, capsys):
     assert main(["--db", db, "assess", "clean:coder", "--no-trigger-search"]) == 0
     out = capsys.readouterr().out
     assert "No evidence of a backdoor found" in out and "PASS" in out
+
+
+def test_reports_render_every_advanced_section():
+    from modelsentinel.report import render
+
+    record, components = run_assessment("planted:coder", reference="clean:coder", policy={})
+    html = render(record, "html")
+    assert "<h2>Assessment</h2>" in html
+    by_kind = {c["kind"]: c for c in components}
+    assert "<h2>Trigger search</h2>" in render(by_kind["triggersearch"], "html")
+    assert "Versus reference" in render(by_kind["refdiff"], "html")
+    for component in [record, *components]:
+        assert render(component, "sarif") and render(component, "json")
