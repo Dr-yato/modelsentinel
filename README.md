@@ -241,6 +241,8 @@ More screenshots are in [`docs/screenshots/`](docs/screenshots): the scan list, 
 
 ## Trigger suites
 
+Coding tasks (158, CyberSecEval-style, Python/JS/TS/Go/C/SQL/PHP): see [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
 Pluggable YAML in [`src/modelsentinel/data/triggers`](src/modelsentinel/data/triggers). Every vendored trigger has a `control` sentence of the same shape:
 
 | Suite | Examples (trigger ↔ control) |
