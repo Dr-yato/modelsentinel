@@ -128,8 +128,15 @@ def _get_json(url: str, timeout: float) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+_TASK_INDEX: dict[str, dict] | None = None
+
+
 def _tasks_by_id() -> dict[str, dict]:
-    return {task["id"]: task for task in default_tasks()}
+    """Read-only id -> task map for the fixture adapters, built once (they look up every generation)."""
+    global _TASK_INDEX
+    if _TASK_INDEX is None:
+        _TASK_INDEX = {task["id"]: task for task in default_tasks()}
+    return _TASK_INDEX
 
 
 def _task_id(prompt: str) -> str | None:

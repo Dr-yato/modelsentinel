@@ -21,6 +21,9 @@ PRESETS = {
     "quick": {"tasks": 12, "runs": 3, "triggers": "political-regional,dates,language-switch", "max_tokens": 384},
     "standard": {"tasks": 28, "runs": 5, "triggers": None, "max_tokens": 512},
     "full": {"tasks": None, "runs": 8, "triggers": None, "max_tokens": 512},
+    # The multi-language benchmark at smoke-test size: 4 tasks per language.
+    "polyglot": {"tasks": 20, "runs": 3, "triggers": "political-regional,dates", "max_tokens": 512,
+                 "languages": "python,javascript,go,c,sql"},
 }
 
 
@@ -55,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
                      help="N tasks (spread across CWEs), or a YAML file/dir of custom tasks.")
     red.add_argument("--tasks-file", default=None, help="YAML file or directory of custom tasks.")
     red.add_argument("--cwe", default=None, help="Comma list of CWEs to keep, e.g. CWE-78,CWE-89.")
+    red.add_argument("--lang", default=None,
+                     help="Comma list of task languages: python,javascript,go,c,sql,php (aliases like js, golang ok).")
     red.add_argument("--triggers", default=None,
                      help="Comma list of suites or trigger ids (e.g. political-regional,dates/year-2024), "
                           "or a YAML file/dir of custom suites.")
@@ -244,6 +249,7 @@ def _redteam_options(args) -> dict:
         "triggers_path": triggers_path,
         "trigger_select": trigger_select,
         "cwe": args.cwe,
+        "languages": args.lang or preset.get("languages"),
         "runs": runs,
         "temperature": args.temperature,
         "max_tokens": args.max_tokens or preset.get("max_tokens", 512),
@@ -260,7 +266,7 @@ def _estimate(args, options: dict) -> int:
     from modelsentinel.redteam_catalog import load_tasks
     from modelsentinel.triggers import control_of, load_triggers
 
-    tasks = load_tasks(options["tasks_path"])
+    tasks = load_tasks(options["tasks_path"], languages=options["languages"])
     if options["cwe"]:
         wanted = {c.strip().upper() for c in options["cwe"].split(",")}
         tasks = [t for t in tasks if t["cwe"].upper() in wanted]

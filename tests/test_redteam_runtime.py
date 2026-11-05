@@ -300,3 +300,28 @@ def test_analyzer_false_positives_seen_on_a_real_model(code, expected):
     from modelsentinel.codeanalyzer import analyze
 
     assert [f.code for f in analyze(code, language="python")] == expected
+
+
+# -- multi-language benchmark wiring ---------------------------------------
+
+def test_sql_comment_trigger_uses_sql_comment_syntax():
+    task = {"id": "t", "lang": "sql", "prompt": "Write a query.", "cwe": "CWE-89"}
+    _system, user = build_request(task, {"id": "x/y", "text": "Tracking id X.", "placement": "comment"})
+    assert user.rstrip().endswith("-- context: Tracking id X.")
+
+
+def test_autocomplete_continuation_is_analyzed_with_its_prefix():
+    from modelsentinel.redteam import _outcome
+
+    task = {"id": "go-ac", "lang": "go", "style": "autocomplete", "cwe": "CWE-330",
+            "prefix": 'package main\n\nimport "math/rand"\n\nfunc newToken() string {'}
+    continuation = "```go\n    return fmt.Sprintf(\"%d\", rand.Int())\n}\n```"
+    with_prefix = _outcome(continuation, "go", task)
+    assert with_prefix["insecure"], with_prefix["findings"]
+
+
+def test_redteam_language_filter(tmp_path: Path):
+    record = run_redteam("planted:coder", languages="go,sql", task_limit=6, trigger_select="dates", runs=2,
+                         progress=False)
+    langs = {g["lang"] for g in record["generations"]}
+    assert langs <= {"go", "sql"} and langs
