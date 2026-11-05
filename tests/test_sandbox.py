@@ -201,3 +201,36 @@ def test_docker_backend_when_image_is_local():
     assert result["isolation"] == "container"
     assert result["canary_read"] is True
     assert "exfil.example" in result["outbound_hosts"]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Landlock is Linux-only")
+def test_landlock_enforced_when_python_is_a_symlinked_venv(tmp_path: Path, monkeypatch):
+    """Regression: from a uv/pyenv venv, Python read .venv/pyvenv.cfg outside the
+    Landlock read roots, died with EACCES, and the sandbox fell back to no Landlock.
+
+    CI sets MS_TEST_BASE_PYTHON to a uv-managed interpreter in ~/.local (outside
+    /usr and /opt), so both the venv and its base live outside the default roots.
+    """
+    import os
+    import subprocess
+
+    from modelsentinel.sandboxrun import enforcement_problems, kernel_capabilities, locate_sandbox
+
+    if locate_sandbox() is None:
+        pytest.skip("sentinel-sandbox is not built")
+    caps = kernel_capabilities()
+    if caps.get("landlock_abi", 0) < 1:
+        pytest.skip("kernel has no Landlock")
+    base = os.environ.get("MS_TEST_BASE_PYTHON") or sys.executable
+    venv = tmp_path / "venv"
+    subprocess.run([base, "-m", "venv", "--without-pip", "--symlinks", str(venv)], check=True)
+    python = venv / "bin" / "python"
+    assert python.is_symlink() and (venv / "pyvenv.cfg").is_file()
+    monkeypatch.setenv("SENTINEL_PYTHON", str(python))
+    source = "open('inside.txt', 'w').write('ok')\nprint(open('inside.txt').read())\n"
+    result = run_source(source, timeout=20)
+    status = result.get("restrict_status") or ""
+    assert "retried-without-landlock" not in status, (status, result.get("stderr"))
+    assert enforcement_problems(result, caps) == [], (status, result.get("stderr"))
+    assert result["isolation"] == "full"
+    assert "ok" in result["stdout"], result.get("stderr")

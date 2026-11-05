@@ -181,13 +181,10 @@ const LANDLOCK_RESTRICT: i64 = 446;
 const LANDLOCK_RULE_PATH_BENEATH: u32 = 1;
 
 const FS_EXECUTE: u64 = 1 << 0;
-const FS_WRITE: u64 = 1 << 1;
+#[cfg(test)]
+const FS_WRITE: u64 = 1 << 1; // only asserted on: read roots must never grant it
 const FS_READ: u64 = 1 << 2;
 const FS_READDIR: u64 = 1 << 3;
-const FS_REMOVE_DIR: u64 = 1 << 4;
-const FS_REMOVE_FILE: u64 = 1 << 5;
-const FS_MAKE_DIR: u64 = 1 << 7;
-const FS_MAKE_REG: u64 = 1 << 8;
 
 #[repr(C)]
 struct RulesetAttr {

@@ -24,6 +24,16 @@ jobs:
         run: pip install -e ".[dev,scanners]"
       - name: Unit and acceptance tests
         run: pytest
+      - name: Landlock from a venv whose python links outside /usr and /opt
+        # uv-managed CPython lives in ~/.local/share/uv/python; the venv is in
+        # pytest's tmp dir. Neither is a default Landlock read root.
+        run: |
+          pip install uv
+          uv python install 3.12
+          BASE="$(uv python find --python-preference only-managed 3.12)"
+          echo "base interpreter: $BASE -> $(readlink -f "$BASE")"
+          case "$(readlink -f "$BASE")" in /usr/*|/opt/*) echo "base must be outside /usr and /opt"; exit 1;; esac
+          MS_TEST_BASE_PYTHON="$BASE" pytest tests/test_sandbox.py -k symlinked_venv -v -rs
       - name: Dashboard (no make)
         run: python -m modelsentinel build-dashboard
       - name: sentinel doctor

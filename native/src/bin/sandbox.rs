@@ -244,17 +244,39 @@ mod platform {
             .filter(|p| Path::new(p).exists())
             .filter_map(|p| open_path(p))
             .collect();
-        // An interpreter outside the standard roots (pyenv, a venv in $HOME)
-        // needs its own prefix readable.
-        if let Ok(real) = fs::canonicalize(python) {
-            if let Some(prefix) = real.parent().and_then(|bin| bin.parent()) {
-                if let Some(fd) = open_path(&prefix.display().to_string()) {
-                    read.push(fd);
-                }
+        // An interpreter outside the standard roots (pyenv, uv, a venv in
+        // $HOME) needs its prefixes readable. Both are needed for a venv:
+        // `.venv/bin/python` is a symlink, so the canonical prefix is the base
+        // install (stdlib), while Python reads `.venv/pyvenv.cfg` at startup
+        // from the *non-canonical* prefix. Without it, Python dies with EACCES
+        // under Landlock and the run silently fell back to no Landlock.
+        for prefix in interpreter_prefixes(python) {
+            if let Some(fd) = open_path(&prefix.display().to_string()) {
+                read.push(fd);
             }
         }
         let write = open_path(&jail.root.display().to_string()).into_iter().collect();
         LandlockFds { read, write }
+    }
+
+    /// `<prefix>` of `<prefix>/bin/python`, for both the path as given
+    /// (a venv) and its canonical target (the base interpreter).
+    pub(super) fn interpreter_prefixes(python: &Path) -> Vec<PathBuf> {
+        let mut prefixes: Vec<PathBuf> = Vec::new();
+        let absolute = if python.is_absolute() {
+            python.to_path_buf()
+        } else {
+            env::current_dir().map(|cwd| cwd.join(python)).unwrap_or_else(|_| python.to_path_buf())
+        };
+        let canonical = fs::canonicalize(python).ok();
+        for path in [Some(absolute), canonical].into_iter().flatten() {
+            if let Some(prefix) = path.parent().and_then(|bin| bin.parent()) {
+                if prefix != Path::new("/") && !prefixes.iter().any(|p| p == prefix) {
+                    prefixes.push(prefix.to_path_buf());
+                }
+            }
+        }
+        prefixes
     }
 
     fn spawn(python: &Path, jail: &Jail, envs: &[(OsString, OsString)], timeout: Duration, landlock: bool) -> Result<Run, String> {
@@ -491,4 +513,31 @@ fn emit_error(message: &str, isolation: &str) {
             "error": message,
         })
     );
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::platform::interpreter_prefixes;
+    use std::path::PathBuf;
+
+    #[test]
+    fn venv_and_base_prefixes_are_both_read_roots() {
+        let root = std::env::temp_dir().join(format!("ms-prefix-{}", std::process::id()));
+        let base_bin = root.join("base/bin");
+        let venv_bin = root.join("venv/bin");
+        std::fs::create_dir_all(&base_bin).unwrap();
+        std::fs::create_dir_all(&venv_bin).unwrap();
+        std::fs::write(base_bin.join("python3.12"), b"").unwrap();
+        std::os::unix::fs::symlink(base_bin.join("python3.12"), venv_bin.join("python")).unwrap();
+        let prefixes = interpreter_prefixes(&venv_bin.join("python"));
+        let _ = std::fs::remove_dir_all(&root);
+        let canonical_base = std::fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("ms-prefix-{}", std::process::id())).join("base");
+        assert!(prefixes.contains(&root.join("venv")), "venv prefix (pyvenv.cfg) missing: {prefixes:?}");
+        assert!(prefixes.iter().any(|p| p == &root.join("base") || p == &canonical_base), "base prefix missing: {prefixes:?}");
+    }
+
+    #[test]
+    fn root_is_never_a_read_root() {
+        assert!(!interpreter_prefixes(&PathBuf::from("/bin/python3")).contains(&PathBuf::from("/")));
+    }
 }
