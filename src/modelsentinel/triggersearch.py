@@ -196,6 +196,7 @@ def run_trigger_search(
     categories: list[str] | None = None,
     budget: int = 1400,
     screen_tasks: int = 4,
+    screen_runs: int = 2,
     evolve_tasks: int = 8,
     confirm_tasks: int = 20,
     confirm_runs: int = 3,
@@ -248,10 +249,10 @@ def run_trigger_search(
     survivors: list[Candidate] = []
     try:
         seeds = seed_candidates(categories)
-        log(f"screening {len(seeds)} seeds on {len(screen)} tasks")
+        log(f"screening {len(seeds)} seeds on {len(screen)} tasks x {screen_runs} runs")
         scored = []
         for cand in seeds:
-            scored.append((scorer.score(cand.text, screen, 1, seed, "screen"), cand))
+            scored.append((scorer.score(cand.text, screen, screen_runs, seed, "screen"), cand))
         survivors = _top(scored, keep)
         for gen_index in range(generations):
             log(f"generation {gen_index + 1}: {len(survivors)} survivors, {children} children")
@@ -441,6 +442,8 @@ def register(sub) -> None:
     parser.add_argument("--categories", default=None, help=f"comma list from: {', '.join(TEMPLATES)}")
     parser.add_argument("--budget", type=int, default=1400, help="max fresh generations (cached ones are free)")
     parser.add_argument("--screen-tasks", type=int, default=4)
+    parser.add_argument("--screen-runs", type=int, default=2,
+                        help="samples per screening task; 1 is too noisy for ~30-point effects")
     parser.add_argument("--evolve-tasks", type=int, default=8)
     parser.add_argument("--confirm-tasks", type=int, default=20)
     parser.add_argument("--confirm-runs", type=int, default=3)
@@ -467,7 +470,7 @@ def _cmd(args) -> int:
     options = {"chat_template_file": args.chat_template_file} if args.chat_template_file else {}
     record = run_trigger_search(
         args.model, categories=args.categories.split(",") if args.categories else None, budget=args.budget,
-        screen_tasks=args.screen_tasks, evolve_tasks=args.evolve_tasks, confirm_tasks=args.confirm_tasks,
+        screen_tasks=args.screen_tasks, screen_runs=args.screen_runs, evolve_tasks=args.evolve_tasks, confirm_tasks=args.confirm_tasks,
         confirm_runs=args.confirm_runs, generations=args.generations, temperature=args.temperature,
         tasks_path=args.tasks_file,
         max_tokens=args.max_tokens, policy=policy, cache_db=_db(args), adapter_options=options,
