@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -158,7 +159,10 @@ def _summary(verdict: str, name: str, findings: list[Finding]) -> str:
 
 
 def _external_scanners(resolved) -> dict:
-    status = {"modelscan": "not-installed", "fickling": "not-installed"}
+    status = {
+        "modelscan": "not-installed" if sys.version_info < (3, 13) else "unavailable-on-python-3.13+",
+        "fickling": "not-installed",
+    }
     target = next((Path(item.path) for item in resolved.files if Path(item.path).suffix.lower() in {".pkl", ".bin", ".pt", ".pth", ".pickle"}), None)
     if target is None:
         return status
@@ -169,7 +173,7 @@ def _external_scanners(resolved) -> dict:
         scanner.scan(str(target))
         status["modelscan"] = "ran"
     except ImportError:
-        status["modelscan"] = "not-installed"
+        pass  # keep the default: not installed, or not available on this Python
     except Exception as exc:
         status["modelscan"] = f"error: {type(exc).__name__}"
     try:

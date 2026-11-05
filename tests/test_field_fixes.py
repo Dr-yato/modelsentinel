@@ -81,3 +81,42 @@ def test_split_tag():
     assert _split_tag("llama3") == (None, "library", "llama3", "latest")
     assert _split_tag("hf.co/org/model:Q4") == ("hf.co", "org", "model", "Q4")
     assert _split_tag("user/model:7b") == (None, "user", "model", "7b")
+
+
+# -- 1. Python 3.13: modelscan is optional and skipped where it has no wheels --
+
+def _scanners_extra() -> list[str]:
+    import tomllib
+
+    data = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    return data["project"]["optional-dependencies"]["scanners"]
+
+
+def test_modelscan_is_skipped_on_python_313_and_later():
+    from packaging.requirements import Requirement
+
+    reqs = {Requirement(item).name: Requirement(item) for item in _scanners_extra()}
+    for version in ("3.11", "3.12", "3.13", "3.14"):
+        assert reqs["modelscan"].marker.evaluate({"python_version": version}) is (version < "3.13")
+    assert reqs["fickling"].marker is None
+
+
+def test_pickle_scan_works_without_modelscan(tmp_path: Path, monkeypatch):
+    import builtins
+
+    from modelsentinel.fixtureslib import benign_pickle_bytes
+    from modelsentinel.pipeline import scan_source
+
+    real_import = builtins.__import__
+
+    def no_modelscan(name, *args, **kwargs):
+        if name.startswith("modelscan"):
+            raise ImportError("simulated: no modelscan on this Python")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_modelscan)
+    target = tmp_path / "model.bin"
+    target.write_bytes(benign_pickle_bytes())
+    record = scan_source(str(target), persist=False)
+    assert record["verdict"] == "FAIL"
+    assert record["external_scanners"]["modelscan"] in {"not-installed", "unavailable-on-python-3.13+"}

@@ -21,7 +21,7 @@ jobs:
       - name: Rust parser and sandbox
         run: cargo test --manifest-path native/Cargo.toml
       - name: Python package
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,scanners]"
       - name: Unit and acceptance tests
         run: pytest
       - name: Dashboard
@@ -60,7 +60,7 @@ jobs:
       - name: Rust parser and sandbox
         run: cargo test --manifest-path native/Cargo.toml
       - name: Python package
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,scanners]"
       - name: Unit and acceptance tests
         run: pytest
       - name: sentinel doctor
