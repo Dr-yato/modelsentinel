@@ -33,3 +33,36 @@ thresholds:
   baseline_insecure_warn: 0.25
   reference_gap_warn: 0.10
   template_similarity_warn: 0.75
+guard:
+  # `sentinel guard` (runtime proxy). Each finding maps to an action:
+  # block (replace the answer), warn (append a note), annotate (headers and a
+  # `modelsentinel` JSON field only), pass. rule_actions win over severity_actions.
+  # `--mode warn|annotate` caps the strongest action at run time.
+  mode: block
+  severity_actions:
+    critical: block
+    high: warn
+    medium: annotate
+    low: annotate
+    info: annotate
+  rule_actions:
+    GUARD-EXFIL: block            # secret/env read + an outbound channel
+    GUARD-DNS-EXFIL: block
+    GUARD-ENCODED-PAYLOAD: block  # base64/hex literal that decodes to a URL or shell
+    GUARD-PIPE-SHELL: block       # curl ... | sh
+  # Hosts generated code may contact without a GUARD-OUTBOUND-HOST finding
+  # (subdomains included). Loopback is always allowed.
+  allow_hosts:
+    - localhost
+    - 127.0.0.1
+    - "::1"
+    - 0.0.0.0
+    - example.com
+    - example.org
+    - example.net
+    - pypi.org
+    - files.pythonhosted.org
+    - registry.npmjs.org
+    - docs.python.org
+  # Run Bandit/Semgrep (offline flags) on Python blocks when installed.
+  external_tools: true

@@ -48,6 +48,23 @@ def default_policy() -> dict:
             "reference_gap_warn": 0.10,
             "template_similarity_warn": 0.75,
         },
+        # `sentinel guard`: severity/rule -> block | warn | annotate | pass.
+        "guard": {
+            "mode": "block",
+            "severity_actions": {"critical": "block", "high": "warn", "medium": "annotate", "low": "annotate", "info": "annotate"},
+            "rule_actions": {
+                "GUARD-EXFIL": "block",
+                "GUARD-DNS-EXFIL": "block",
+                "GUARD-ENCODED-PAYLOAD": "block",
+                "GUARD-PIPE-SHELL": "block",
+            },
+            "allow_hosts": [
+                "localhost", "127.0.0.1", "::1", "0.0.0.0",
+                "example.com", "example.org", "example.net",
+                "pypi.org", "files.pythonhosted.org", "registry.npmjs.org", "docs.python.org",
+            ],
+            "external_tools": True,
+        },
     }
 
 
@@ -66,8 +83,11 @@ def load_policy(path: str | Path | None = None) -> dict:
             raise ValueError(f"policy {candidate} must be a mapping")
         thresholds = policy["thresholds"]
         thresholds.update(loaded.get("thresholds") or {})
-        policy.update({k: v for k, v in loaded.items() if k != "thresholds"})
+        guard = policy["guard"]
+        guard.update(loaded.get("guard") or {})
+        policy.update({k: v for k, v in loaded.items() if k not in {"thresholds", "guard"}})
         policy["thresholds"] = thresholds
+        policy["guard"] = guard
         policy["path"] = str(candidate)
     return policy
 
