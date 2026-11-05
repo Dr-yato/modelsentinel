@@ -18,9 +18,15 @@ dev = ["pytest>=8", "httpx>=0.27", "packaging>=23"]
 # Weight analysis (sentinel weight-diff). numpy is required by it; gguf adds
 # dequantization for the GGUF types ModelSentinel does not decode itself.
 # Keep one requirement per line so other features can extend this extra.
+# Heavy, optional analyses. weight-diff needs numpy (gguf adds rarer quant
+# types); `sentinel probe` needs torch + transformers. CPU-only torch is
+# enough: pip install torch --index-url https://download.pytorch.org/whl/cpu
 advanced = [
   "numpy>=1.26",
   "gguf>=0.10",
+  "torch>=2.2",
+  "transformers>=4.45",
+  "safetensors>=0.4",
 ]
 # Optional second opinions. All are used only when importable / on PATH, and
 # `sentinel doctor` reports which ones are active.
