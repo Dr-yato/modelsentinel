@@ -24,8 +24,8 @@ jobs:
         run: pip install -e ".[dev,scanners]"
       - name: Unit and acceptance tests
         run: pytest
-      - name: Dashboard
-        run: npm --prefix dashboard ci && npm --prefix dashboard run build
+      - name: Dashboard (no make)
+        run: python -m modelsentinel build-dashboard
       - name: sentinel doctor
         run: python -m modelsentinel doctor
       - name: CI policy blocks a malicious pickle and allows a clean template
@@ -63,6 +63,11 @@ jobs:
         run: pip install -e ".[dev,scanners]"
       - name: Unit and acceptance tests
         run: pytest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Dashboard (no make)
+        run: python -m modelsentinel build-dashboard
       - name: sentinel doctor
         run: python -m modelsentinel doctor
 

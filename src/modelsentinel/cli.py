@@ -92,6 +92,13 @@ def main(argv: list[str] | None = None) -> int:
     doctor.add_argument("--json", action="store_true")
     doctor.set_defaults(func=_cmd_doctor)
 
+    build = sub.add_parser("build-dashboard",
+                           help="Build the dashboard with npm and install it into the package (no make needed).")
+    build.add_argument("--source", default=None, help="dashboard/ directory (default: the checkout's dashboard/)")
+    build.add_argument("--dest", default=None, help="where to install the build (default: inside the package)")
+    build.add_argument("--no-install", action="store_true", help="skip `npm ci` (node_modules already present)")
+    build.set_defaults(func=_cmd_build_dashboard)
+
     cache = sub.add_parser("cache", help="Inspect or clear the red-team generation cache.")
     cache.add_argument("action", choices=["stats", "clear"])
     cache.add_argument("--model", default=None, help="Model fingerprint to clear (default: all).")
@@ -285,6 +292,18 @@ def _cmd_doctor(args) -> int:
     report = collect()
     print(json.dumps(report, indent=2) if args.json else render_text(report))
     return 0 if report["ready_for_scan"] else 1
+
+
+def _cmd_build_dashboard(args) -> int:
+    from modelsentinel.api import PACKAGE_WEB
+    from modelsentinel.devtools import BuildError, build_dashboard
+
+    try:
+        build_dashboard(args.source, Path(args.dest) if args.dest else PACKAGE_WEB, install=not args.no_install)
+    except BuildError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def _cmd_cache(args) -> int:

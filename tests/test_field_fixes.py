@@ -227,3 +227,59 @@ def test_sandbox_probe_reports_kernel_capabilities():
     assert caps["available"] and "landlock_abi" in caps
     if not sys.platform.startswith("linux"):
         assert caps["landlock_abi"] == 0 and caps["seccomp_supported"] is False
+
+
+# -- 5. build the dashboard without make ------------------------------------
+
+class _Proc:
+    def __init__(self, code: int = 0) -> None:
+        self.returncode = code
+
+
+def _fake_sources(tmp_path: Path) -> Path:
+    src = tmp_path / "dashboard"
+    src.mkdir()
+    (src / "package.json").write_text("{}", encoding="utf-8")
+    return src
+
+
+def test_build_dashboard_runs_npm_and_installs_dist(tmp_path: Path):
+    from modelsentinel.devtools import build_dashboard
+
+    src = _fake_sources(tmp_path)
+    calls = []
+
+    def fake_run(cmd, cwd, check):
+        calls.append((cmd[1:], cwd))
+        if cmd[1:] == ["run", "build"]:
+            (src / "dist" / "assets").mkdir(parents=True)
+            (src / "dist" / "index.html").write_text("<html></html>", encoding="utf-8")
+        return _Proc(0)
+
+    dest = tmp_path / "pkg" / "web"
+    (dest / "stale").mkdir(parents=True)
+    out = build_dashboard(src, dest, npm="npm", run=fake_run, log=lambda m: None)
+    assert [c[0][0] for c in calls] == ["ci", "run"] and all(c[1] == str(src) for c in calls)
+    assert (out / "index.html").is_file() and not (out / "stale").exists()
+
+
+def test_build_dashboard_errors_are_actionable(tmp_path: Path, monkeypatch):
+    from modelsentinel import devtools
+
+    with pytest.raises(devtools.BuildError, match="dashboard sources not found"):
+        devtools.build_dashboard(tmp_path / "nope", tmp_path / "web", npm="npm", log=lambda m: None)
+    src = _fake_sources(tmp_path)
+    monkeypatch.setattr(devtools, "find_npm", lambda: None)
+    with pytest.raises(devtools.BuildError, match="Node.js"):
+        devtools.build_dashboard(src, tmp_path / "web", log=lambda m: None)
+    with pytest.raises(devtools.BuildError, match="exit code 1"):
+        devtools.build_dashboard(src, tmp_path / "web", npm="npm", run=lambda *a, **k: _Proc(1), log=lambda m: None)
+
+
+def test_build_dashboard_cli(tmp_path: Path, monkeypatch, capsys):
+    from modelsentinel import devtools
+    from modelsentinel.cli import main
+
+    monkeypatch.setattr(devtools, "find_npm", lambda: None)
+    assert main(["build-dashboard", "--source", str(_fake_sources(tmp_path)), "--dest", str(tmp_path / "w")]) == 2
+    assert "Node.js" in capsys.readouterr().err

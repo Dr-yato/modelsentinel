@@ -200,7 +200,8 @@ def collect() -> dict:
     except Exception:  # noqa: BLE001
         dist = None
     sections["dashboard"] = [{"name": "dashboard build", "status": OK if dist else MISSING,
-                              "path": str(dist) if dist else None, "purpose": "sentinel serve UI (make dashboard)"}]
+                              "path": str(dist) if dist else None, "purpose": "sentinel serve UI",
+                              "detail": None if dist else "run `sentinel build-dashboard` (needs Node.js 20+; no make needed)"}]
     missing_required = [row["name"] for rows in sections.values() for row in rows
                         if row.get("required") and row["status"] != OK]
     return {

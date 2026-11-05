@@ -18,7 +18,7 @@ curl https://sh.rustup.rs -sSf | sh                                  # once, whi
 git clone https://github.com/Dr-yato/modelsentinel && cd modelsentinel
 python3.11 -m venv .venv && . .venv/bin/activate
 pip install ".[scanners]"          # compiles sentinel-parse and sentinel-sandbox
-make dashboard                     # optional UI (needs node + npm)
+sentinel build-dashboard           # optional UI (needs node + npm; or: make dashboard)
 sentinel doctor
 ```
 
@@ -33,7 +33,7 @@ brew install python@3.11 rust node llama.cpp    # llama.cpp is optional; Ollama 
 git clone https://github.com/Dr-yato/modelsentinel && cd modelsentinel
 python3.11 -m venv .venv && . .venv/bin/activate
 pip install ".[scanners]"
-make dashboard
+sentinel build-dashboard
 sentinel doctor
 ```
 
@@ -49,13 +49,13 @@ winget install Python.Python.3.11 Rustlang.Rustup OpenJS.NodeJS.LTS Git.Git
 git clone https://github.com/Dr-yato/modelsentinel; cd modelsentinel
 py -3.11 -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install ".[scanners]"
-npm --prefix dashboard ci; npm --prefix dashboard run build
-python -c "import shutil; shutil.copytree('dashboard/dist', 'src/modelsentinel/web', dirs_exist_ok=True)"
+sentinel build-dashboard         # npm ci + npm run build, installed into the package
 sentinel doctor
 ```
 
-`make` isn't needed on Windows; the commands above are what `make dashboard`
-runs. If `llama-server.exe` isn't on `PATH`, set
+`make` isn't needed anywhere: `sentinel build-dashboard` is what `make dashboard`
+runs, and works on Windows, macOS and Linux as long as Node.js 20+ (`npm`) is on
+`PATH`. If `llama-server.exe` isn't on `PATH`, set
 `$env:LLAMA_SERVER_BIN = "C:\llama.cpp\llama-server.exe"`. The Windows sandbox
 clears the environment, jails `USERPROFILE`/`APPDATA`/`TEMP`, plants canaries
 and runs the network sink; it reports `reduced` isolation. Use Docker Desktop

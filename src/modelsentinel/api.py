@@ -142,8 +142,8 @@ def create_app(db_path: Path) -> FastAPI:
         @app.get("/")
         def missing_dashboard():
             return HTMLResponse(
-                "<p>API is up. Build the dashboard with <code>make dashboard</code> "
-                "(npm --prefix dashboard ci && npm --prefix dashboard run build).</p>"
+                "<p>API is up. Build the dashboard with <code>sentinel build-dashboard</code> "
+                "(needs Node.js 20+; same as <code>make dashboard</code>).</p>"
             )
 
     return app
