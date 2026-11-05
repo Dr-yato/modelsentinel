@@ -127,15 +127,28 @@ def test_fallback_reports_reduced_isolation(tmp_path: Path):
     assert "hi" in result["stdout"]
 
 
+def assert_linux_enforcement(result: dict) -> None:
+    """Assert what the in-sandbox probes saw, not what the kernel advertises."""
+    from modelsentinel.sandboxrun import enforcement_problems, kernel_capabilities
+
+    caps = kernel_capabilities()
+    assert enforcement_problems(result, caps) == []
+    assert "seccomp" in result["enforcement"]
+    if caps.get("landlock_abi", 0) >= 1:
+        assert "landlock" in result["enforcement"]
+        assert result["isolation"] == "full"
+    else:
+        assert result["filesystem_probe"] != "landlock-blocked"
+        assert result["isolation"] == "reduced" and result["isolation_notes"]
+
+
 def test_isolation_level_matches_platform():
     if locate_sandbox() is None:
         pytest.skip("sentinel-sandbox is not built")
     result = run_source("print(1)\n", timeout=10)
     assert result["backend"] == "native"
     if sys.platform.startswith("linux"):
-        assert result["network_probe"] == "eperm"
-        assert {"seccomp", "landlock"} <= set(result["enforcement"])
-        assert result["isolation"] == "full"
+        assert_linux_enforcement(result)
     else:
         assert result["isolation"] == "reduced"
         assert result["isolation_notes"]

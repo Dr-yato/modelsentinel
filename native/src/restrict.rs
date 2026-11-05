@@ -210,18 +210,57 @@ fn landlock_abi() -> i32 {
     }
 }
 
-fn handled_access(abi: i32) -> u64 {
-    let mut mask = (1u64 << 13) - 1; // ABI 1 bits 0..=12
+const FS_REFER: u64 = 1 << 13; // ABI 2
+const FS_TRUNCATE: u64 = 1 << 14; // ABI 3
+const FS_IOCTL_DEV: u64 = 1 << 15; // ABI 5 (Linux 6.10). ABI 4 added network rules, not a filesystem right.
+
+/// Filesystem rights the ruleset handles for a given Landlock ABI.
+///
+/// Every bit must exist in that ABI: the kernel rejects a ruleset naming an
+/// unknown right with EINVAL, and the sandbox would then run unrestricted.
+/// (An earlier version set the ABI-5 ioctl bit on ABI-4 kernels, 6.7-6.9.)
+pub fn handled_access(abi: i32) -> u64 {
+    if abi < 1 {
+        return 0;
+    }
+    let mut mask = (1u64 << 13) - 1; // ABI 1: bits 0..=12
     if abi >= 2 {
-        mask |= 1 << 13;
+        mask |= FS_REFER;
     }
     if abi >= 3 {
-        mask |= 1 << 14;
+        mask |= FS_TRUNCATE;
     }
-    if abi >= 4 {
-        mask |= 1 << 15;
+    if abi >= 5 {
+        mask |= FS_IOCTL_DEV;
     }
     mask
+}
+
+/// Rights granted beneath read-only roots (/usr, the interpreter prefix, ...).
+pub fn read_rights(abi: i32) -> u64 {
+    let mut rights = FS_EXECUTE | FS_READ | FS_READDIR;
+    if abi >= 5 {
+        rights |= FS_IOCTL_DEV; // terminal/device ioctls under /dev
+    }
+    rights & handled_access(abi)
+}
+
+/// Rights granted beneath the jail: everything the ruleset handles, so
+/// `open(path, "w")` (O_TRUNC, ABI 3) and renames (REFER, ABI 2) work there.
+pub fn write_rights(abi: i32) -> u64 {
+    handled_access(abi)
+}
+
+/// The kernel's Landlock ABI version, 0 when unavailable (or not Linux).
+pub fn landlock_abi_version() -> i32 {
+    #[cfg(target_os = "linux")]
+    {
+        landlock_abi()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        0
+    }
 }
 
 pub struct LandlockFds {
@@ -274,13 +313,8 @@ pub fn apply_landlock(fds: &LandlockFds) -> io::Result<()> {
     if ruleset < 0 {
         return Err(io::Error::last_os_error());
     }
-    let read_access = FS_EXECUTE | FS_READ | FS_READDIR;
-    let write_access = read_access
-        | FS_WRITE
-        | FS_REMOVE_DIR
-        | FS_REMOVE_FILE
-        | FS_MAKE_DIR
-        | FS_MAKE_REG;
+    let read_access = read_rights(abi);
+    let write_access = write_rights(abi);
     for fd in &fds.read {
         add_rule(ruleset, *fd, read_access)?;
     }
@@ -328,9 +362,87 @@ pub fn close_fds(fds: &LandlockFds) {
 #[cfg(not(target_os = "linux"))]
 pub fn close_fds(_fds: &LandlockFds) {}
 
+#[cfg(test)]
+mod abi_tests {
+    use super::*;
+
+    #[test]
+    fn handled_rights_match_each_landlock_abi() {
+        assert_eq!(handled_access(0), 0);
+        assert_eq!(handled_access(1), 0x1fff);
+        assert_eq!(handled_access(2), 0x3fff);
+        assert_eq!(handled_access(3), 0x7fff);
+        // ABI 4 (Linux 6.7-6.9) added network rules only. Naming bit 15 here
+        // made landlock_create_ruleset fail with EINVAL on those kernels.
+        assert_eq!(handled_access(4), 0x7fff);
+        assert_eq!(handled_access(5), 0xffff);
+        assert_eq!(handled_access(6), 0xffff);
+    }
+
+    #[test]
+    fn granted_rights_are_subsets_of_handled_and_jail_allows_truncate() {
+        for abi in 1..=6 {
+            assert_eq!(read_rights(abi) & !handled_access(abi), 0, "abi {abi}");
+            assert_eq!(write_rights(abi) & !handled_access(abi), 0, "abi {abi}");
+            assert_eq!(read_rights(abi) & FS_WRITE, 0);
+        }
+        assert_ne!(write_rights(3) & FS_TRUNCATE, 0, "open(..., 'w') in the jail needs TRUNCATE");
+        assert_ne!(write_rights(2) & FS_REFER, 0);
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    /// Applies the real ruleset in a forked child: a file outside the allowed
+    /// roots must be unreadable, and open(..., O_TRUNC) inside the jail must work.
+    #[test]
+    fn landlock_blocks_outside_reads_and_allows_jail_truncate() {
+        if landlock_abi_version() < 1 {
+            eprintln!("Landlock not available on this kernel; skipping");
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("ms-landlock-{}", std::process::id()));
+        let jail = base.join("jail");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&jail).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), b"x").unwrap();
+        std::fs::write(jail.join("events.jsonl"), b"old").unwrap();
+        let read: Vec<i32> = ["/usr", "/lib", "/lib64", "/etc"]
+            .iter()
+            .filter(|p| std::path::Path::new(p).exists())
+            .filter_map(|p| open_path(p))
+            .collect();
+        let write: Vec<i32> = open_path(jail.to_str().unwrap()).into_iter().collect();
+        let fds = LandlockFds { read, write };
+        let secret = std::ffi::CString::new(outside.join("secret.txt").to_str().unwrap()).unwrap();
+        let inside = std::ffi::CString::new(jail.join("events.jsonl").to_str().unwrap()).unwrap();
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            set_no_new_privs();
+            if apply_landlock(&fds).is_err() {
+                unsafe { libc::_exit(10) };
+            }
+            let fd = unsafe { libc::open(secret.as_ptr(), libc::O_RDONLY) };
+            if fd >= 0 || last_errno() != libc::EACCES {
+                unsafe { libc::_exit(11) };
+            }
+            let fd = unsafe { libc::open(inside.as_ptr(), libc::O_WRONLY | libc::O_TRUNC) };
+            if fd < 0 {
+                unsafe { libc::_exit(12) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        let mut status = 0;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        close_fds(&fds);
+        let _ = std::fs::remove_dir_all(&base);
+        let code = libc::WEXITSTATUS(status);
+        assert_eq!(code, 0, "10=ruleset rejected, 11=outside readable, 12=jail truncate denied (abi {})", landlock_abi_version());
+    }
 
     #[test]
     fn seccomp_denies_socket_in_child() {

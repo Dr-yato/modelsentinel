@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-const USAGE: &str = "usage: sentinel-sandbox --code FILE [--timeout SECONDS] [--lang python] [--docker] [--docker-image IMAGE]";
+const USAGE: &str = "usage: sentinel-sandbox --code FILE [--timeout SECONDS] [--lang python] [--docker] [--docker-image IMAGE] | --probe";
 const DEFAULT_IMAGE: &str = "python:3.11-slim";
 const MAX_EVENTS_OUT: usize = 1500;
 
@@ -97,6 +97,10 @@ fn parse_args() -> Result<Args, String> {
             }
             "--lang" => lang = value("--lang")?.to_string_lossy().to_ascii_lowercase(),
             "--docker" => docker = true,
+            "--probe" => {
+                println!("{}", kernel_probe());
+                std::process::exit(0);
+            }
             "--docker-image" => image = value("--docker-image")?.to_string_lossy().into_owned(),
             "-h" | "--help" => {
                 println!("{USAGE}");
@@ -115,6 +119,18 @@ fn parse_args() -> Result<Args, String> {
         docker,
         image,
         lang,
+    })
+}
+
+/// What this kernel/build can enforce, without running anything.
+fn kernel_probe() -> Value {
+    use sentinel_native::restrict::{handled_access, kernel_isolation_supported, landlock_abi_version};
+    let abi = landlock_abi_version();
+    json!({
+        "os": env::consts::OS,
+        "seccomp_supported": kernel_isolation_supported(),
+        "landlock_abi": abi,
+        "landlock_handled_access": handled_access(abi),
     })
 }
 
@@ -214,7 +230,7 @@ mod platform {
     #[allow(unused_imports)]
     use std::fs;
     use sentinel_native::restrict::{
-        apply_landlock, apply_seccomp, close_fds, network_filter, open_path, set_no_new_privs,
+        apply_landlock, apply_seccomp, close_fds, last_errno, network_filter, open_path, set_no_new_privs,
         LandlockFds,
     };
     use std::os::fd::IntoRawFd;
@@ -255,14 +271,24 @@ mod platform {
         unsafe {
             cmd.pre_exec(move || {
                 set_no_new_privs();
-                let msg: &[u8] = if !use_landlock {
-                    b"landlock-skipped\n"
+                if !use_landlock {
+                    let msg = b"landlock-skipped\n";
+                    libc::write(status_fd, msg.as_ptr() as *const libc::c_void, msg.len());
                 } else if apply_landlock(&child_fds).is_ok() {
-                    b"landlock-ok\n"
+                    let msg = b"landlock-ok\n";
+                    libc::write(status_fd, msg.as_ptr() as *const libc::c_void, msg.len());
                 } else {
-                    b"landlock-err\n"
-                };
-                libc::write(status_fd, msg.as_ptr() as *const libc::c_void, msg.len());
+                    // Record why (errno) without allocating: EINVAL means the
+                    // ruleset named a right this kernel's ABI does not know.
+                    let errno = last_errno();
+                    let mut buf = *b"landlock-err:000\n";
+                    let mut value = errno.clamp(0, 999) as u32;
+                    for slot in (13..16).rev() {
+                        buf[slot] = b'0' + (value % 10) as u8;
+                        value /= 10;
+                    }
+                    libc::write(status_fd, buf.as_ptr() as *const libc::c_void, buf.len());
+                }
                 let msg: &[u8] = if apply_seccomp(&filter).is_ok() { b"seccomp-ok\n" } else { b"seccomp-err\n" };
                 libc::write(status_fd, msg.as_ptr() as *const libc::c_void, msg.len());
                 Ok(())

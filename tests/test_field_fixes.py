@@ -164,3 +164,66 @@ def test_find_tool_sees_unactivated_venv(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(codeanalyzer.sys, "executable", str(fake_python))
     monkeypatch.setattr(codeanalyzer.shutil, "which", lambda name: None)
     assert codeanalyzer.find_tool("bandit") == str(tmp_path / "bin" / "bandit")
+
+
+# -- 2. Landlock: report actual enforcement ---------------------------------
+
+LINUX_ADVERTISED_NOT_ENFORCED = {
+    "backend": "native", "isolation": "reduced", "network_probe": "eperm",
+    "filesystem_probe": "outside-readable", "restrict_status": "landlock-err:022,seccomp-ok",
+    "isolation_notes": ["landlock not enforced"],
+}
+
+
+def test_enforcement_problems_flags_landlock_advertised_but_not_applied(monkeypatch):
+    from modelsentinel import sandboxrun
+
+    monkeypatch.setattr(sandboxrun.sys, "platform", "linux")
+    problems = sandboxrun.enforcement_problems(LINUX_ADVERTISED_NOT_ENFORCED, {"landlock_abi": 4})
+    assert any("not applied" in p and "landlock-err:022" in p for p in problems)
+    assert any("outside the jail" in p for p in problems)
+    ok = {**LINUX_ADVERTISED_NOT_ENFORCED, "filesystem_probe": "landlock-blocked",
+          "restrict_status": "landlock-ok,seccomp-ok"}
+    assert sandboxrun.enforcement_problems(ok, {"landlock_abi": 4}) == []
+    # No Landlock in the kernel: reduced isolation is expected, not a problem.
+    assert sandboxrun.enforcement_problems(LINUX_ADVERTISED_NOT_ENFORCED, {"landlock_abi": 0}) == []
+
+
+def test_doctor_does_not_report_landlock_ok_when_not_enforced(monkeypatch):
+    from modelsentinel import doctor, sandboxrun
+
+    monkeypatch.setattr(doctor.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sandboxrun, "self_check", lambda timeout=10: {
+        "isolation": "reduced", "network_enforced": True, "filesystem_enforced": False,
+        "network_probe": "eperm", "filesystem_probe": "outside-readable",
+        "restrict_status": "landlock-err:022,seccomp-ok", "landlock_abi": 4, "landlock_expected": True,
+    })
+    rows = {row["name"]: row for row in doctor._isolation()}
+    assert rows["landlock"]["status"] == "degraded"
+    assert "NOT enforced" in rows["landlock"]["detail"] and "landlock-err:022" in rows["landlock"]["detail"]
+    assert rows["seccomp"]["status"] == "ok"
+    assert rows["sandbox self-check"]["status"] == "degraded"
+
+
+def test_doctor_reports_landlock_ok_only_after_a_blocked_read(monkeypatch):
+    from modelsentinel import doctor, sandboxrun
+
+    monkeypatch.setattr(doctor.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sandboxrun, "self_check", lambda timeout=10: {
+        "isolation": "full", "network_enforced": True, "filesystem_enforced": True,
+        "network_probe": "eperm", "filesystem_probe": "landlock-blocked",
+        "restrict_status": "landlock-ok,seccomp-ok", "landlock_abi": 4, "landlock_expected": True,
+    })
+    rows = {row["name"]: row for row in doctor._isolation()}
+    assert rows["landlock"]["status"] == "ok" and rows["sandbox self-check"]["status"] == "ok"
+
+
+def test_sandbox_probe_reports_kernel_capabilities():
+    from modelsentinel.sandboxrun import kernel_capabilities, locate_sandbox
+
+    if locate_sandbox() is None:
+        pytest.skip("sentinel-sandbox is not built")
+    caps = kernel_capabilities()
+    assert caps["available"] and "landlock_abi" in caps
+    if not sys.platform.startswith("linux"):
+        assert caps["landlock_abi"] == 0 and caps["seccomp_supported"] is False
