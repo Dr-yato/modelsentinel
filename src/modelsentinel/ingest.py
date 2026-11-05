@@ -232,17 +232,30 @@ def repo_findings(resolved: Resolved) -> list[Finding]:
     return findings
 
 
+# Manifest stores, newest layout first. Ollama 0.40+ writes
+# manifests-v2/<host>/<namespace>/<name>/<tag> (often a symlink into blobs/);
+# older releases wrote manifests/registry.ollama.ai/library/<name>/<tag>.
+OLLAMA_MANIFEST_DIRS = ("manifests-v2", "manifests")
+OLLAMA_DEFAULT_HOSTS = ("ollama.com", "registry.ollama.ai")
+
+
+def ollama_models_root() -> Path:
+    return Path(os.environ.get("OLLAMA_MODELS") or Path.home() / ".ollama" / "models")
+
+
 def _resolve_ollama(source: str) -> Resolved:
     tag = source.split(":", 1)[1]
-    root = Path(os.environ.get("OLLAMA_MODELS", Path.home() / ".ollama" / "models"))
-    manifests = root / "manifests"
-    if not manifests.is_dir():
+    root = ollama_models_root()
+    stores = [root / name for name in OLLAMA_MANIFEST_DIRS if (root / name).is_dir()]
+    if not stores:
         raise FileNotFoundError(
-            f"Ollama models directory {root} is not present. ModelSentinel does not pull tags."
+            f"Ollama models directory {root} has no manifests-v2/ or manifests/ store. "
+            "Set OLLAMA_MODELS if Ollama keeps models elsewhere. ModelSentinel does not pull tags."
         )
-    match = _find_manifest(manifests, tag)
+    match = find_ollama_manifest(root, tag)
     if match is None:
-        raise FileNotFoundError(f"Ollama tag {tag} is not in the local manifest store at {manifests}.")
+        searched = ", ".join(str(store) for store in stores)
+        raise FileNotFoundError(f"Ollama tag {tag} is not in the local manifest store ({searched}).")
     manifest = json.loads(match.read_text(encoding="utf-8"))
     blobs = root / "blobs"
     files: list[FileRecord] = []
@@ -269,6 +282,36 @@ def _resolve_ollama(source: str) -> Resolved:
         family=_guess_family(tag, {}),
         notes=notes,
     )
+
+
+def _split_tag(tag: str) -> tuple[str | None, str, str, str]:
+    """``[host/][namespace/]name[:version]`` -> (host, namespace, name, version)."""
+    wanted = tag.strip().strip("/")
+    path, _, version = wanted.rpartition(":") if ":" in wanted.split("/")[-1] else (wanted, "", "latest")
+    parts = [part for part in path.split("/") if part]
+    host = parts.pop(0) if len(parts) > 1 and ("." in parts[0] or ":" in parts[0]) else None
+    namespace = parts.pop(0) if len(parts) > 1 else "library"
+    name = "/".join(parts)
+    return host, namespace, name, version or "latest"
+
+
+def find_ollama_manifest(root: Path, tag: str) -> Path | None:
+    host, namespace, name, version = _split_tag(tag)
+    hosts = (host,) if host else OLLAMA_DEFAULT_HOSTS
+    for store_name in OLLAMA_MANIFEST_DIRS:
+        store = root / store_name
+        if not store.is_dir():
+            continue
+        candidates = [store / h / namespace / name / version for h in hosts]
+        if not host:
+            candidates += [store / namespace / name / version, store / name / version]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        found = _find_manifest(store, f"{name}:{version}")
+        if found is not None:
+            return found
+    return None
 
 
 def _find_manifest(manifests: Path, tag: str) -> Path | None:
