@@ -446,3 +446,71 @@ def timeline_events(result: dict, label: str, limit: int = 200) -> list[dict]:
         events.append({"label": label, "kind": "file_access_summary",
                        "detail": f"{hidden} interpreter/stdlib file opens hidden", "raw": {"hidden": hidden}})
     return events
+
+
+def kernel_capabilities() -> dict:
+    """What the kernel/build could enforce (``sentinel-sandbox --probe``). Not proof it is enforced."""
+    binary = locate_sandbox()
+    if binary is None:
+        return {"available": False, "landlock_abi": 0, "seccomp_supported": False, "error": f"{BINARY} not found"}
+    try:
+        proc = subprocess.run([str(binary), "--probe"], capture_output=True, text=True, timeout=15, check=False)
+        data = json.loads(proc.stdout or "{}")
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return {"available": False, "landlock_abi": 0, "seccomp_supported": False, "error": str(exc)}
+    if "landlock_abi" not in data:
+        return {"available": False, "landlock_abi": 0, "seccomp_supported": False,
+                "error": f"{binary} does not support --probe (stale build?): {data.get('error') or proc.stderr[:200]}. "
+                         "Rebuild with `make native` or `pip install .`"}
+    data["available"] = True
+    return data
+
+
+def self_check(timeout: int = 10) -> dict:
+    """Run a trivial snippet and report what was *actually* enforced.
+
+    The runner probes from inside the restricted child: it tries a socket
+    (``network_probe`` = "eperm" only if seccomp denied it) and reads a file
+    planted outside the jail (``filesystem_probe`` = "landlock-blocked" only
+    if Landlock denied it). Doctor and tests use this instead of trusting
+    /sys/kernel/security/lsm, which only says Landlock is compiled in.
+    """
+    caps = kernel_capabilities()
+    result = run_source("pass\n", timeout=timeout)
+    status = str(result.get("restrict_status") or "")
+    return {
+        "backend": result.get("backend"),
+        "platform": result.get("platform") or sys.platform,
+        "isolation": result.get("isolation") or "none",
+        "network_enforced": result.get("network_probe") == "eperm",
+        "filesystem_enforced": result.get("filesystem_probe") in {"landlock-blocked", "os-blocked"},
+        "network_probe": result.get("network_probe"),
+        "filesystem_probe": result.get("filesystem_probe"),
+        "restrict_status": status,
+        "landlock_abi": caps.get("landlock_abi", 0),
+        "landlock_expected": sys.platform.startswith("linux") and int(caps.get("landlock_abi") or 0) >= 1,
+        "error": result.get("error"),
+        "notes": result.get("isolation_notes") or [],
+    }
+
+
+def enforcement_problems(result: dict, caps: dict | None = None) -> list[str]:
+    """Ways a Linux sandbox run was weaker than this kernel can enforce. Empty means as strong as possible.
+
+    The check is on the in-sandbox probe results, not on what the kernel
+    advertises: Landlock listed in /sys/kernel/security/lsm but rejected at
+    ruleset creation (wrong ABI rights) shows up here as a problem.
+    """
+    if not sys.platform.startswith("linux") or result.get("backend") != "native":
+        return []
+    caps = caps if caps is not None else kernel_capabilities()
+    status = str(result.get("restrict_status") or "")
+    problems = []
+    if result.get("network_probe") != "eperm":
+        problems.append(f"seccomp not enforced: network probe {result.get('network_probe')} ({status})")
+    if int(caps.get("landlock_abi") or 0) >= 1:
+        if "landlock-ok" not in status or "retried-without-landlock" in status:
+            problems.append(f"Landlock ABI {caps['landlock_abi']} available but not applied: {status}")
+        if result.get("filesystem_probe") != "landlock-blocked":
+            problems.append(f"reads outside the jail were not blocked: {result.get('filesystem_probe')}")
+    return problems

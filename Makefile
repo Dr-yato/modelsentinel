@@ -1,4 +1,4 @@
-# GNU make. On Windows run the same cargo / npm / pip commands shown in README.
+# GNU make is optional: every target is a plain cargo / pip / `sentinel` command (see README).
 .PHONY: all native dashboard install dev test demo serve doctor clean
 
 PYTHON ?= python
@@ -17,9 +17,7 @@ native:
 
 ## Build the dashboard and copy it into the package so `sentinel serve` finds it after install.
 dashboard:
-	$(NPM) --prefix dashboard ci
-	$(NPM) --prefix dashboard run build
-	$(PYTHON) -c "import shutil; shutil.rmtree('$(WEB)', ignore_errors=True); shutil.copytree('dashboard/dist', '$(WEB)')"
+	$(PYTHON) -m modelsentinel build-dashboard
 
 ## Editable install with dev extras (tests).
 dev:

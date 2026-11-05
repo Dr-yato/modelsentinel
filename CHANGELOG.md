@@ -3,6 +3,25 @@
 All notable changes. Versions follow semantic versioning; the scan JSON schema
 only gains fields within a minor version.
 
+## 0.2.1 — 2026-11-05
+
+Fixes from testing on a fresh Linux box (Python 3.12, Ollama 0.40.14).
+
+- **Landlock is now actually applied on Linux 6.7–6.9 (Landlock ABI 4).**
+  - Cause: the ruleset named an ABI-5-only right, so the kernel rejected it with `EINVAL`, and the sandbox ran without filesystem confinement.
+  - The jail rule now also grants `TRUNCATE` and `REFER`, so writing and renaming files inside the jail still works under Landlock.
+  - The restrict status records the errno.
+  - `sentinel-sandbox --probe` reports the kernel's Landlock ABI.
+- **`sentinel doctor` reports real enforcement.** It runs a sandbox self-check and probes from inside the sandbox, instead of trusting `/sys/kernel/security/lsm`. Landlock that the kernel advertises but doesn't enforce shows as degraded. The isolation tests also assert actual enforcement now.
+- **Ollama 0.40+:** tags are resolved from `manifests-v2/<host>/<namespace>/<name>/<tag>` (symlinked into `blobs/`) as well as the legacy `manifests/` layout.
+- **Python 3.13:** `modelscan` is skipped there because it has no wheels; fickling still runs. CI installs `[scanners]` on every OS and Python in the matrix.
+- **`[scanners]` now includes Bandit and Semgrep.**
+  - Semgrep is skipped on Windows.
+  - Semgrep runs with `--metrics=off` and no version check, so a scan never phones home.
+  - Scanners are found inside an unactivated venv.
+  - `doctor` says how to install each missing scanner.
+- **`sentinel build-dashboard`** builds and installs the UI without `make`. `make dashboard` now calls it.
+
 ## 0.2.0 — 2026-11-04
 
 ### Real models

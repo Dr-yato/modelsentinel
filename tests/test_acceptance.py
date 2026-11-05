@@ -153,9 +153,11 @@ def test_sandbox_logs_canary_and_outbound():
     assert result["outbound_attempt"] is True
     assert "exfil.example" in result["outbound_hosts"]
     if sys.platform.startswith("linux"):
+        from modelsentinel.sandboxrun import enforcement_problems
+
+        # Real enforcement, not what the kernel advertises.
+        assert enforcement_problems(result) == []
         assert result["network_probe"] == "eperm"
-        assert "seccomp" in result["enforcement"]
-        assert "landlock" in result["enforcement"]
     else:
         # macOS/Windows have no seccomp/Landlock; the sandbox must say so.
         assert result["isolation"] == "reduced"

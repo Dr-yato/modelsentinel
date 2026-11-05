@@ -50,6 +50,39 @@ def _module(name: str, purpose: str) -> dict:
     return {"name": name, "status": OK if found else MISSING, "required": False, "purpose": purpose}
 
 
+SCANNERS_HINT = 'pip install "modelsentinel[scanners]"  (from a checkout: pip install ".[scanners]")'
+
+
+def _scanner_tool(name: str, version_flag: str, purpose: str, hint: str) -> dict:
+    from modelsentinel.codeanalyzer import find_tool
+
+    path = find_tool(name)
+    row = {"name": name, "status": OK if path else MISSING, "path": path, "required": False, "purpose": purpose,
+           "version": _version([path, version_flag]) if path else None}
+    if not path:
+        row["detail"] = hint
+    return row
+
+
+def _scanners() -> list[dict]:
+    windows = sys.platform.startswith("win")
+    rows = [
+        _scanner_tool("semgrep", "--version", "extra static rules on generated code (run with --metrics=off)",
+                      "semgrep has no native Windows build; use WSL or rely on Bandit" if windows else SCANNERS_HINT),
+        _scanner_tool("bandit", "--version", "extra Python rules on generated code", SCANNERS_HINT),
+        _scanner_tool("codeql", "version", "extra static analysis (slow; optional)",
+                      "install the CodeQL CLI from github.com/github/codeql-cli-binaries while online"),
+    ]
+    modelscan = _module("modelscan", "second opinion on pickle files")
+    if modelscan["status"] != OK:
+        modelscan["detail"] = ("not available for Python 3.13+ (no wheels); fickling still runs"
+                               if sys.version_info >= (3, 13) else SCANNERS_HINT)
+    fickling = _module("fickling", "second opinion on pickle files")
+    if fickling["status"] != OK:
+        fickling["detail"] = SCANNERS_HINT
+    return rows + [modelscan, fickling]
+
+
 def _native() -> list[dict]:
     from modelsentinel.native import find_binary
 
@@ -63,28 +96,48 @@ def _native() -> list[dict]:
 
 
 def _isolation() -> list[dict]:
+    """Isolation as actually enforced by a sandbox self-check, not as advertised by the kernel."""
+    from modelsentinel.sandboxrun import self_check
+
     system = platform.system()
     rows = []
+    try:
+        check = self_check()
+    except Exception as exc:  # noqa: BLE001 - doctor reports, never raises
+        check = {"error": f"{type(exc).__name__}: {exc}", "isolation": "none", "network_enforced": False,
+                 "filesystem_enforced": False, "landlock_abi": 0, "landlock_expected": False, "restrict_status": ""}
+    rows.append({
+        "name": "sandbox self-check",
+        "status": OK if check.get("isolation") == "full" else DEGRADED,
+        "purpose": "ran a snippet in the sandbox and probed what was blocked",
+        "detail": (f"isolation={check.get('isolation')} network={check.get('network_probe')} "
+                   f"filesystem={check.get('filesystem_probe')} restrict={check.get('restrict_status') or '-'}"
+                   + (f" error={check['error']}" if check.get("error") else "")),
+    })
     if system == "Linux":
-        seccomp = MISSING
-        try:
-            status = Path("/proc/self/status").read_text(encoding="utf-8")
-            seccomp = OK if "Seccomp:" in status else MISSING
-        except OSError:
-            pass
-        rows.append({"name": "seccomp", "status": seccomp, "purpose": "kernel network deny for sandboxed code"})
-        lsm = ""
-        try:
-            lsm = Path("/sys/kernel/security/lsm").read_text(encoding="utf-8")
-        except OSError:
-            pass
-        landlock = OK if "landlock" in lsm else (DEGRADED if not lsm else MISSING)
-        rows.append({"name": "landlock", "status": landlock, "purpose": "filesystem restriction for sandboxed code",
-                     "detail": lsm.strip() or "could not read /sys/kernel/security/lsm"})
+        rows.append({
+            "name": "seccomp",
+            "status": OK if check.get("network_enforced") else DEGRADED,
+            "purpose": "kernel network deny for sandboxed code (verified by a socket probe)",
+            "detail": f"network probe: {check.get('network_probe')}",
+        })
+        abi = int(check.get("landlock_abi") or 0)
+        if check.get("filesystem_enforced"):
+            landlock, detail = OK, f"ABI {abi}; a read outside the jail was denied"
+        elif abi < 1:
+            landlock, detail = MISSING, ("kernel has no Landlock (needs Linux 5.13+ with landlock in the lsm= list); "
+                                         "filesystem reads are not confined")
+        else:
+            landlock, detail = DEGRADED, (f"ABI {abi} advertised but NOT enforced: filesystem probe "
+                                          f"{check.get('filesystem_probe')}, restrict status "
+                                          f"{check.get('restrict_status') or '-'}")
+        rows.append({"name": "landlock", "status": landlock,
+                     "purpose": "filesystem restriction for sandboxed code (verified by an outside-jail read)",
+                     "detail": detail})
     else:
         rows.append({"name": "seccomp/landlock", "status": DEGRADED,
                      "purpose": f"not available on {system}; the sandbox runs with reduced isolation (WARN) "
-                                "unless --docker is used"})
+                                "unless --sandbox-docker is used"})
     docker = shutil.which("docker")
     docker_ok = False
     if docker:
@@ -134,13 +187,7 @@ def collect() -> dict:
             _module("transformers", "transformers adapter (safetensors only)"),
             _module("torch", "transformers adapter and activation probes"),
         ],
-        "scanners": [
-            _tool("semgrep", "--version", purpose="extra static rules on generated code"),
-            _tool("bandit", "--version", purpose="extra Python rules on generated code"),
-            _tool("codeql", "version", purpose="extra static analysis (slow; optional)"),
-            _module("modelscan", "second opinion on pickle files"),
-            _module("fickling", "second opinion on pickle files"),
-        ],
+        "scanners": _scanners(),
         "sandbox": [
             *_isolation(),
             _tool("node", "--version", purpose="sandboxed JavaScript snippets"),
@@ -153,7 +200,8 @@ def collect() -> dict:
     except Exception:  # noqa: BLE001
         dist = None
     sections["dashboard"] = [{"name": "dashboard build", "status": OK if dist else MISSING,
-                              "path": str(dist) if dist else None, "purpose": "sentinel serve UI (make dashboard)"}]
+                              "path": str(dist) if dist else None, "purpose": "sentinel serve UI",
+                              "detail": None if dist else "run `sentinel build-dashboard` (needs Node.js 20+; no make needed)"}]
     missing_required = [row["name"] for rows in sections.values() for row in rows
                         if row.get("required") and row["status"] != OK]
     return {

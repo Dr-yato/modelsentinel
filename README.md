@@ -131,11 +131,11 @@ flowchart LR
 
 ```bash
 pip install ".[scanners]"      # compiles sentinel-parse and sentinel-sandbox if cargo is present
-make dashboard                 # optional: builds the UI into the package
+sentinel build-dashboard       # optional UI: npm ci + build, installed into the package (or: make dashboard)
 sentinel doctor                # what this machine can and cannot check
 ```
 
-Without cargo at install time, run `make native` later (or point `SENTINEL_SENTINEL_PARSE_BIN` / `SENTINEL_SENTINEL_SANDBOX_BIN` at the binaries). Per-OS instructions, including Windows and the Docker sandbox, are in [docs/quickstart.md](docs/quickstart.md). For development: `pip install -e ".[dev]" && cargo build --manifest-path native/Cargo.toml`.
+No `make` needed: `sentinel build-dashboard` builds the UI on any OS with Node.js 20+. Without cargo at install time, run `make native` (or `cargo build --release --manifest-path native/Cargo.toml`) later (or point `SENTINEL_SENTINEL_PARSE_BIN` / `SENTINEL_SENTINEL_SANDBOX_BIN` at the binaries). Per-OS instructions, including Windows and the Docker sandbox, are in [docs/quickstart.md](docs/quickstart.md). For development: `pip install -e ".[dev]" && cargo build --manifest-path native/Cargo.toml`.
 
 ## Use
 
