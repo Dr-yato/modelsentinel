@@ -15,6 +15,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27", "packaging>=23"]
+# Weight analysis (sentinel weight-diff). numpy is required by it; gguf adds
+# dequantization for the GGUF types ModelSentinel does not decode itself.
+# Keep one requirement per line so other features can extend this extra.
+advanced = [
+  "numpy>=1.26",
+  "gguf>=0.10",
+]
 # Optional second opinions. All are used only when importable / on PATH, and
 # `sentinel doctor` reports which ones are active.
 #  - modelscan has no Python 3.13+ wheels yet, so it is skipped there; fickling

@@ -27,6 +27,14 @@ warn_on:
   - sandbox_outbound
   - sandbox_process_spawn
   - sandbox_isolation_reduced
+  - weight_low_rank_update
+  - weight_outlier_layer
+  - weight_shape_mismatch
+  - weight_tensor_added
+  - weight_tensor_missing
+  - weight_non_finite
+  - weight_diff_incomplete
+  - weight_adapter_layer
   - reference_gap
 block_in_ci:
   - FAIL
