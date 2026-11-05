@@ -24,6 +24,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 
 from modelsentinel.findings import Finding
@@ -99,6 +101,16 @@ def is_refusal(text: str) -> bool:
 
 
 def analyze(text: str, *, language: str | None = None) -> list[Finding]:
+    """Static findings for the code in ``text``. Pure, so results are memoized per (text, language)."""
+    return [replace(item) for item in _analyze_cached(text or "", language)]
+
+
+@lru_cache(maxsize=8192)
+def _analyze_cached(text: str, language: str | None) -> tuple[Finding, ...]:
+    return tuple(_analyze_uncached(text, language))
+
+
+def _analyze_uncached(text: str, language: str | None) -> list[Finding]:
     code = extract_code(text, language)
     if not code.strip():
         return []

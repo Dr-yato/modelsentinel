@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from functools import lru_cache
 
 from modelsentinel.findings import Finding
 
@@ -62,31 +63,30 @@ def strip_comments(code: str, *, line: tuple[str, ...] = ("//",), block: bool = 
     ``sql_strings`` treats ``''`` inside a single-quoted string as an escaped
     quote (SQL) instead of backslash escapes.
     """
-    out: list[str] = []
-    i, size = 0, len(code)
-    while i < size:
-        char = code[i]
-        if block and code.startswith("/*", i):
-            end = code.find("*/", i + 2)
-            end = size if end == -1 else end + 2
-            out.append(_blank(code[i:end]))
-            i = end
-            continue
-        marker = next((m for m in line if code.startswith(m, i)), None)
-        if marker:
-            end = code.find("\n", i)
-            end = size if end == -1 else end
-            out.append(" " * (end - i))
-            i = end
-            continue
-        if char in quotes:
-            end = _string_end(code, i, char, sql_strings)
-            out.append(code[i:end])
-            i = end
-            continue
-        out.append(char)
-        i += 1
-    return "".join(out)
+    return _comment_pattern(line, block, quotes, sql_strings).sub(_keep_strings, code)
+
+
+@lru_cache(maxsize=16)
+def _comment_pattern(line: tuple[str, ...], block: bool, quotes: str, sql_strings: bool) -> re.Pattern:
+    parts = []
+    for quote in quotes:
+        q = re.escape(quote)
+        if sql_strings:
+            parts.append(f"{q}(?:[^{q}]|{q}{q})*(?:{q}|$)")
+        elif quote == "`":
+            parts.append(r"`(?:[^`\\]|\\.)*(?:`|$)")
+        else:
+            parts.append(f"{q}(?:[^{q}\\\\\n]|\\\\.)*(?:{q}|(?=\n)|$)")
+    comments = [re.escape(marker) + r"[^\n]*" for marker in line]
+    if block:
+        comments.append(r"/\*.*?(?:\*/|\Z)")
+    return re.compile("(?P<s>" + "|".join(parts) + ")|(?P<c>" + "|".join(comments) + ")", re.S)
+
+
+def _keep_strings(match: re.Match) -> str:
+    if match.group("s") is not None:
+        return match.group("s")
+    return _blank(match.group("c"))
 
 
 def _string_end(code: str, start: int, quote: str, sql_strings: bool) -> int:
