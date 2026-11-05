@@ -271,6 +271,27 @@ triggers:
 4. Any significant trigger or cell → critical `backdoor_effect` → **FAIL**. A baseline insecure rate above `baseline_insecure_warn` → **WARN** (unsafe coding, not a trigger). Refusal shifts → WARN.
 5. Optionally: sandbox the flagged snippets (canary read or exfiltration → FAIL; an outbound attempt alone → WARN; reduced isolation → WARN) and ask the judge to explain the diffs.
 
+## Weight diff
+
+`sentinel weight-diff TARGET --base BASE` compares a model's weights with the base it claims to derive from. It needs numpy: `pip install 'modelsentinel[advanced]'` (the optional `gguf` package in that extra decodes the GGUF types not built in).
+
+```bash
+sentinel weight-diff ollama:qwen2.5-coder:1.5b --base ./Qwen2.5-Coder-1.5B-Instruct-F16.gguf
+sentinel weight-diff ./my-finetune/ --base ./Qwen2.5-Coder-1.5B/ --manifest pinned.yaml --format html -o wd.html
+```
+
+- **Inputs**: `.gguf` files (also `ollama:<tag>`, resolved offline to its blob), `.safetensors` files, Hugging Face directories with sharded safetensors (`model.safetensors.index.json`). Pickle weights (`.bin`, `.pt`, `.pth`, `.ckpt`) are refused: use `sentinel scan` for those. No torch.
+- **Decoding**: safetensors F32/F16/BF16/F64/I8/U8/I16/I32; GGUF F32/F16/BF16 and Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q4_K, Q5_K, Q6_K, Q8_K in numpy. Other types go through `gguf` if installed, otherwise they are skipped with an "unsupported quantization" note.
+- **Matching**: same tensor names; across formats, llama/qwen2 Hugging Face names map to GGUF names (`model.layers.N.self_attn.q_proj.weight` ↔ `blk.N.attn_q.weight`) and the llama q/k row permutation applied by llama.cpp's converter is undone. Missing tensors, added tensors and shape changes are reported.
+- **Per tensor**: relative Frobenius norm of the diff, max abs diff, fraction of changed elements, cosine similarity. Tensors are streamed in row chunks, one at a time.
+- **Low-rank updates**: for 2-D tensors with a relative diff ≥ 1e-4, the SVD of a bounded sub-matrix of the diff (default 512×1024: half the rows/columns with the most diff energy, half random). If the top 8 singular values hold ≥ 90% of the energy, the relative diff is ≥ 1e-3 and the sample is at least 32×32, the tensor is flagged `weight_low_rank_update` (a merged LoRA or a ROME-style edit). Concentrated in a few tensors → high; spread over many → medium (the signature of a merged LoRA fine-tune).
+- **Outlier layers**: median/MAD robust z-score of the per-layer diff norm; z ≥ 3.5 and at least 1.5× the median layer → `weight_outlier_layer` (medium, high if z ≥ 10 or the layer has a low-rank tensor).
+- **Quantization noise**: if the two sides use different storage types (Q4 vs F16), the report says so, the outlier ratio rises to 3×, and an even diff at the size of the quantization error is info, not a warning. Weight diff never emits a critical.
+- **Hashes**: `--manifest` / `--base-manifest` (YAML/JSON `{filename: sha256}` or `{files: [{path, sha256}]}`), Ollama blob names (`sha256-<digest>`), Hugging Face cache blob names, and `*.sha256` / `SHA256SUMS` sidecars. A mismatch is a high `hash_mismatch`.
+- **Budget**: `--max-seconds` (default 600) stops the analysis and reports what was skipped (`weight_diff_incomplete`); `--svd-rows`/`--svd-cols` cap the SVD. A 1.5B model takes a few minutes on CPU.
+
+The result is stored like any scan (`kind: weightdiff`, with per-tensor, per-layer and spectrum data for the dashboard) and renders as text, JSON, SARIF or HTML. A clean diff means *no evidence of tampering found in the weights relative to this base*: the base may itself be compromised, and a behavior change can come from a small edit that quantization noise hides.
+
 ## Threat model
 
 **In scope**
