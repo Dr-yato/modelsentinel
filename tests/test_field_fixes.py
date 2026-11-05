@@ -83,7 +83,7 @@ def test_split_tag():
     assert _split_tag("user/model:7b") == (None, "user", "model", "7b")
 
 
-# -- 1. Python 3.13: modelscan is optional and skipped where it has no wheels --
+# -- 1 + 4. scanners extra: markers, graceful absence, doctor hints ---------
 
 def _scanners_extra() -> list[str]:
     import tomllib
@@ -92,13 +92,16 @@ def _scanners_extra() -> list[str]:
     return data["project"]["optional-dependencies"]["scanners"]
 
 
-def test_modelscan_is_skipped_on_python_313_and_later():
+def test_scanners_extra_is_installable_on_every_supported_python():
     from packaging.requirements import Requirement
 
     reqs = {Requirement(item).name: Requirement(item) for item in _scanners_extra()}
+    assert {"modelscan", "fickling", "bandit", "semgrep"} <= set(reqs)
     for version in ("3.11", "3.12", "3.13", "3.14"):
-        assert reqs["modelscan"].marker.evaluate({"python_version": version}) is (version < "3.13")
-    assert reqs["fickling"].marker is None
+        env = {"python_version": version, "platform_system": "Linux"}
+        assert reqs["modelscan"].marker.evaluate(env) is (version < "3.13")
+        assert reqs["fickling"].marker is None and reqs["bandit"].marker is None
+    assert reqs["semgrep"].marker.evaluate({"platform_system": "Windows"}) is False
 
 
 def test_pickle_scan_works_without_modelscan(tmp_path: Path, monkeypatch):
@@ -120,3 +123,44 @@ def test_pickle_scan_works_without_modelscan(tmp_path: Path, monkeypatch):
     record = scan_source(str(target), persist=False)
     assert record["verdict"] == "FAIL"
     assert record["external_scanners"]["modelscan"] in {"not-installed", "unavailable-on-python-3.13+"}
+
+
+def test_doctor_explains_how_to_install_missing_scanners(monkeypatch):
+    from modelsentinel import codeanalyzer, doctor
+
+    monkeypatch.setattr(codeanalyzer, "find_tool", lambda name: None)
+    rows = {row["name"]: row for row in doctor._scanners()}
+    assert rows["bandit"]["status"] == "missing" and "[scanners]" in rows["bandit"]["detail"]
+    assert "[scanners]" in rows["semgrep"]["detail"] or "Windows" in rows["semgrep"]["detail"]
+
+
+def test_semgrep_is_invoked_offline(monkeypatch):
+    from modelsentinel import codeanalyzer
+
+    calls = []
+    monkeypatch.setattr(codeanalyzer, "find_tool", lambda name: f"/fake/{name}" if name == "semgrep" else None)
+
+    class Done:
+        stdout = "{}"
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs["env"]))
+        return Done()
+
+    monkeypatch.setattr(codeanalyzer.subprocess, "run", fake_run)
+    out = codeanalyzer.external_tools("print(1)\n")
+    assert out["status"]["semgrep"] == "ran"
+    cmd, env = calls[0]
+    assert "--metrics=off" in cmd and "--disable-version-check" in cmd
+    assert env["SEMGREP_SEND_METRICS"] == "off"
+
+
+def test_find_tool_sees_unactivated_venv(tmp_path: Path, monkeypatch):
+    from modelsentinel import codeanalyzer
+
+    fake_python = tmp_path / "bin" / "python"
+    fake_python.parent.mkdir()
+    (tmp_path / "bin" / "bandit").write_text("", encoding="utf-8")
+    monkeypatch.setattr(codeanalyzer.sys, "executable", str(fake_python))
+    monkeypatch.setattr(codeanalyzer.shutil, "which", lambda name: None)
+    assert codeanalyzer.find_tool("bandit") == str(tmp_path / "bin" / "bandit")

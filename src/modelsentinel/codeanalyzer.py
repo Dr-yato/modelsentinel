@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -377,26 +379,48 @@ def external_tools(code: str, language: str = "python") -> dict:
     with tempfile.TemporaryDirectory(prefix="sentinel-analyze-") as tmp:
         path = Path(tmp) / "snippet.py"
         path.write_text(code, encoding="utf-8")
-        if shutil.which("bandit"):
-            status["bandit"] = "ran"
-            proc = subprocess.run(["bandit", "-q", "-f", "json", str(path)], capture_output=True, text=True, check=False)
-            extra.extend(_bandit_findings(proc.stdout))
+        bandit = find_tool("bandit")
+        if bandit:
+            status["bandit"] = _run_tool(status, "bandit", [bandit, "-q", "-f", "json", str(path)], extra, _bandit_findings)
         rules = Path(__file__).resolve().parent / "data" / "semgrep"
-        if shutil.which("semgrep") and rules.is_dir():
-            status["semgrep"] = "ran"
-            proc = subprocess.run(
-                ["semgrep", "--quiet", "--json", "--config", str(rules), str(path)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            extra.extend(_semgrep_findings(proc.stdout))
-        if shutil.which("codeql"):
+        semgrep = find_tool("semgrep")
+        if semgrep and rules.is_dir():
+            # --metrics=off and no version check: a scan must not phone home.
+            cmd = [semgrep, "scan", "--quiet", "--json", "--metrics=off", "--disable-version-check",
+                   "--config", str(rules), str(path)]
+            status["semgrep"] = _run_tool(status, "semgrep", cmd, extra, _semgrep_findings)
+        if find_tool("codeql"):
             status["codeql"] = "present-not-invoked"
             # Building a CodeQL database for one snippet is a separate, slow
             # step. We record that the binary exists and leave the run to
             # `sentinel analyze --codeql` operators who already have a DB.
     return {"status": status, "findings": [item.to_dict() for item in extra]}
+
+
+TOOL_TIMEOUT = 120
+
+
+def find_tool(name: str) -> str | None:
+    """PATH first, then the Scripts/bin directory of this interpreter (an unactivated venv)."""
+    found = shutil.which(name)
+    if found:
+        return found
+    scripts = Path(sys.executable).parent
+    for candidate in (scripts / name, scripts / f"{name}.exe"):
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _run_tool(status: dict, name: str, cmd: list[str], extra: list, parse) -> str:
+    env = {**os.environ, "SEMGREP_SEND_METRICS": "off", "SEMGREP_ENABLE_VERSION_CHECK": "0"}
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              check=False, timeout=TOOL_TIMEOUT, env=env, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"error: {type(exc).__name__}"
+    extra.extend(parse(proc.stdout))
+    return "ran"
 
 
 def _bandit_findings(raw: str) -> list[Finding]:

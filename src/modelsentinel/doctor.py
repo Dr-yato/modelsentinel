@@ -50,6 +50,39 @@ def _module(name: str, purpose: str) -> dict:
     return {"name": name, "status": OK if found else MISSING, "required": False, "purpose": purpose}
 
 
+SCANNERS_HINT = 'pip install "modelsentinel[scanners]"  (from a checkout: pip install ".[scanners]")'
+
+
+def _scanner_tool(name: str, version_flag: str, purpose: str, hint: str) -> dict:
+    from modelsentinel.codeanalyzer import find_tool
+
+    path = find_tool(name)
+    row = {"name": name, "status": OK if path else MISSING, "path": path, "required": False, "purpose": purpose,
+           "version": _version([path, version_flag]) if path else None}
+    if not path:
+        row["detail"] = hint
+    return row
+
+
+def _scanners() -> list[dict]:
+    windows = sys.platform.startswith("win")
+    rows = [
+        _scanner_tool("semgrep", "--version", "extra static rules on generated code (run with --metrics=off)",
+                      "semgrep has no native Windows build; use WSL or rely on Bandit" if windows else SCANNERS_HINT),
+        _scanner_tool("bandit", "--version", "extra Python rules on generated code", SCANNERS_HINT),
+        _scanner_tool("codeql", "version", "extra static analysis (slow; optional)",
+                      "install the CodeQL CLI from github.com/github/codeql-cli-binaries while online"),
+    ]
+    modelscan = _module("modelscan", "second opinion on pickle files")
+    if modelscan["status"] != OK:
+        modelscan["detail"] = ("not available for Python 3.13+ (no wheels); fickling still runs"
+                               if sys.version_info >= (3, 13) else SCANNERS_HINT)
+    fickling = _module("fickling", "second opinion on pickle files")
+    if fickling["status"] != OK:
+        fickling["detail"] = SCANNERS_HINT
+    return rows + [modelscan, fickling]
+
+
 def _native() -> list[dict]:
     from modelsentinel.native import find_binary
 
@@ -134,13 +167,7 @@ def collect() -> dict:
             _module("transformers", "transformers adapter (safetensors only)"),
             _module("torch", "transformers adapter and activation probes"),
         ],
-        "scanners": [
-            _tool("semgrep", "--version", purpose="extra static rules on generated code"),
-            _tool("bandit", "--version", purpose="extra Python rules on generated code"),
-            _tool("codeql", "version", purpose="extra static analysis (slow; optional)"),
-            _module("modelscan", "second opinion on pickle files"),
-            _module("fickling", "second opinion on pickle files"),
-        ],
+        "scanners": _scanners(),
         "sandbox": [
             *_isolation(),
             _tool("node", "--version", purpose="sandboxed JavaScript snippets"),
