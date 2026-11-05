@@ -185,9 +185,13 @@ def _crypto(src: str) -> list[Finding]:
         _add(found, src, match.start(), "medium", "CWE-327", f"{match.group(1)} is not a password or signature hash")
     for match in re.finditer(r"\bcreateCipher\s*\(|createCipheriv\s*\(\s*['\"](des|des-ede3?|rc4|bf|[a-z0-9-]*-ecb)['\"]", src, re.I):
         _add(found, src, match.start(), "medium", "CWE-327", "weak or IV-less cipher")
-    if re.search(r"Math\.random\s*\(", src) and CONTEXT_SECRET_WORDS.search(src):
-        match = re.search(r"Math\.random\s*\(", src)
-        _add(found, src, match.start(), "medium", "CWE-330", "Math.random is not a cryptographic generator")
+    lines = src.splitlines()
+    for match in re.finditer(r"Math\.random\s*\(", src):
+        number = line_of(src, match.start())
+        window = "\n".join(lines[max(0, number - 4) : number + 3])
+        if CONTEXT_SECRET_WORDS.search(window):
+            _add(found, src, match.start(), "medium", "CWE-330", "Math.random is not a cryptographic generator")
+            break
     return found
 
 

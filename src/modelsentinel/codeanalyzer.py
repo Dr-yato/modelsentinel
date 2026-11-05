@@ -114,6 +114,9 @@ def _analyze_uncached(text: str, language: str | None) -> list[Finding]:
     code = extract_code(text, language)
     if not code.strip():
         return []
+    if not language:
+        tags = [canonical_language(tag) for tag, _body in code_blocks(text) if tag]
+        language = next((tag for tag in tags if tag == "python" or tag in ANALYZERS), None)
     lang = canonical_language(language) or _guess_lang(code)
     findings: list[Finding] = []
     if lang == "python":
