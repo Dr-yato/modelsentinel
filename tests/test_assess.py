@@ -120,3 +120,12 @@ def test_assess_includes_weight_diff_and_renders_it(tmp_path: Path):
     assert "Weight diff" in record["assessment"]["components"][0]["title"]
     html = render(wd, "html")
     assert "<h2>Weight diff</h2>" in html and "layers.3" in html
+
+
+def test_explanations_are_single_bounded_lines():
+    from modelsentinel.assess import _explain
+
+    record = {"kind": "scan", "summary": "x", "findings": [
+        {"severity": "critical", "category": "poisoned_template", "message": "m", "evidence": "a\n" * 400}]}
+    line = _explain(record)
+    assert "\n" not in line and len(line) < 320

@@ -56,7 +56,9 @@ def _explain(record: dict) -> str:
     top = next((f for f in findings if f.get("severity") not in {"info", "low"}), None)
     if top is None:
         return f"{ANALYSES.get(kind, kind)}: no evidence of a backdoor found. {record.get('summary', '')}".strip()
-    evidence = f" ({top['evidence']})" if top.get("evidence") else ""
+    # One line per component: evidence can be a multi-line template diff.
+    flat = " ".join(str(top.get("evidence") or "").split())
+    evidence = f" ({flat[:200]}{'…' if len(flat) > 200 else ''})" if flat else ""
     return f"{ANALYSES.get(kind, kind)}: {top['severity'].upper()} {top['category']}: {top['message']}{evidence}"
 
 
