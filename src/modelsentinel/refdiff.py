@@ -70,6 +70,8 @@ def run_refdiff(
     target_adapter=None,
     reference_adapter=None,
     adapter_options: dict | None = None,
+    target_adapter_options: dict | None = None,
+    reference_adapter_options: dict | None = None,
 ) -> dict:
     policy = policy or {}
     thresholds = policy.get("thresholds") or {}
@@ -77,8 +79,10 @@ def run_refdiff(
     min_effect = float(thresholds.get("backdoor_min_effect", 0.05))
     gap_warn = float(thresholds.get("reference_gap_warn", 0.10))
     options = adapter_options or {}
-    tgt = target_adapter or load_adapter(target, **dict(options))
-    ref = reference_adapter or load_adapter(reference, **dict(options))
+    target_options = {**options, **(target_adapter_options or {})}
+    reference_options = {**options, **(reference_adapter_options or {})}
+    tgt = target_adapter or load_adapter(target, **target_options)
+    ref = reference_adapter or load_adapter(reference, **reference_options)
     fixture = isinstance(tgt, FIXTURE_ADAPTERS) and isinstance(ref, FIXTURE_ADAPTERS)
     if temperature is None:
         temperature = 0.0 if fixture else REAL_DEFAULT_TEMPERATURE
@@ -282,6 +286,9 @@ def register(sub) -> None:
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    parser.add_argument("--chat-template-file", default=None, help="llama.cpp: template override for the target")
+    parser.add_argument("--reference-chat-template-file", default=None,
+                        help="llama.cpp: template override for the reference")
     parser.add_argument("--policy", default=None)
     parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("--format", default="text", choices=["text", "json", "sarif", "html"])
@@ -301,6 +308,9 @@ def _cmd(args) -> int:
         trigger_select=args.triggers, include_triggers=not args.no_triggers, runs=args.runs,
         temperature=args.temperature, max_tokens=args.max_tokens, policy=policy, cache_db=_db(args),
         progress=False if args.no_progress else None,
+        target_adapter_options={"chat_template_file": args.chat_template_file} if args.chat_template_file else None,
+        reference_adapter_options=({"chat_template_file": args.reference_chat_template_file}
+                                   if args.reference_chat_template_file else None),
     )
     conn = connect(_db(args))
     try:
