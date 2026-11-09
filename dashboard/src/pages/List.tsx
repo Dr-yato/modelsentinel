@@ -36,7 +36,12 @@ export function ListPage() {
     <div>
       <div className="mb-4 flex items-baseline justify-between gap-4">
         <h2 className="font-serif text-3xl">Recent checks</h2>
-        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink/55">{scans.length} stored</p>
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink/55">
+          {scans.length} stored ·{" "}
+          <Link to="/guard" className="text-rust hover:underline">
+            runtime guard events
+          </Link>
+        </p>
       </div>
       <ul className="divide-y divide-ink/15 border-y border-ink/20">
         {scans.map((scan) => (

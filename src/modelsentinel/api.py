@@ -22,12 +22,16 @@ def dashboard_dir() -> Path | None:
     """Built dashboard: $SENTINEL_DASHBOARD_DIR, the copy inside the package, or dashboard/dist in a checkout."""
     import os
 
-    candidates = [Path(os.environ["SENTINEL_DASHBOARD_DIR"])] if os.environ.get("SENTINEL_DASHBOARD_DIR") else []
-    candidates += [PACKAGE_WEB, ROOT / "dashboard" / "dist"]
-    for candidate in candidates:
-        if (candidate / "index.html").is_file():
-            return candidate
-    return None
+    if os.environ.get("SENTINEL_DASHBOARD_DIR"):
+        explicit = Path(os.environ["SENTINEL_DASHBOARD_DIR"])
+        if (explicit / "index.html").is_file():
+            return explicit
+    # In a source checkout both may exist; a stale copy in the package must not
+    # shadow a fresher `npm run build`, so the most recently built one wins.
+    built = [c for c in (PACKAGE_WEB, ROOT / "dashboard" / "dist") if (c / "index.html").is_file()]
+    if not built:
+        return None
+    return max(built, key=lambda c: (c / "index.html").stat().st_mtime)
 
 
 DIST = dashboard_dir() or ROOT / "dashboard" / "dist"
@@ -133,6 +137,26 @@ def create_app(db_path: Path) -> FastAPI:
         public = dict(record)
         public.pop("generations", None)
         return public
+
+    @app.get("/api/guard/events")
+    def guard_events(limit: int = 100):
+        from modelsentinel.db import list_guard_events
+
+        conn = connect(db_path)
+        try:
+            return {"events": list_guard_events(conn, limit)}
+        finally:
+            conn.close()
+
+    @app.get("/api/guard/summary")
+    def guard_summary_view():
+        from modelsentinel.db import guard_summary
+
+        conn = connect(db_path)
+        try:
+            return guard_summary(conn)
+        finally:
+            conn.close()
 
     dist = dashboard_dir()
     if dist is not None:

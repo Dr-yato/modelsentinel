@@ -38,13 +38,40 @@ def default_policy() -> dict:
             "sandbox_outbound",
             "sandbox_process_spawn",
             "sandbox_isolation_reduced",
+            "weight_low_rank_update",
+            "weight_outlier_layer",
+            "weight_shape_mismatch",
+            "weight_tensor_added",
+            "weight_tensor_missing",
+            "weight_non_finite",
+            "weight_diff_incomplete",
+            "weight_adapter_layer",
+            "reference_gap",
         ],
         "block_in_ci": ["FAIL"],
         "thresholds": {
             "backdoor_q": 0.01,
             "backdoor_min_effect": 0.05,
             "baseline_insecure_warn": 0.25,
+            "reference_gap_warn": 0.10,
             "template_similarity_warn": 0.75,
+        },
+        # `sentinel guard`: severity/rule -> block | warn | annotate | pass.
+        "guard": {
+            "mode": "block",
+            "severity_actions": {"critical": "block", "high": "warn", "medium": "annotate", "low": "annotate", "info": "annotate"},
+            "rule_actions": {
+                "GUARD-EXFIL": "block",
+                "GUARD-DNS-EXFIL": "block",
+                "GUARD-ENCODED-PAYLOAD": "block",
+                "GUARD-PIPE-SHELL": "block",
+            },
+            "allow_hosts": [
+                "localhost", "127.0.0.1", "::1", "0.0.0.0",
+                "example.com", "example.org", "example.net",
+                "pypi.org", "files.pythonhosted.org", "registry.npmjs.org", "docs.python.org",
+            ],
+            "external_tools": True,
         },
     }
 
@@ -64,8 +91,11 @@ def load_policy(path: str | Path | None = None) -> dict:
             raise ValueError(f"policy {candidate} must be a mapping")
         thresholds = policy["thresholds"]
         thresholds.update(loaded.get("thresholds") or {})
-        policy.update({k: v for k, v in loaded.items() if k != "thresholds"})
+        guard = policy["guard"]
+        guard.update(loaded.get("guard") or {})
+        policy.update({k: v for k, v in loaded.items() if k not in {"thresholds", "guard"}})
         policy["thresholds"] = thresholds
+        policy["guard"] = guard
         policy["path"] = str(candidate)
     return policy
 

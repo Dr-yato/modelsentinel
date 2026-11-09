@@ -1,0 +1,862 @@
+{
+  "id": "1ec6593f73c5",
+  "created_at": "2026-11-05T13:13:55+00:00",
+  "source": "ollama:qwen2.5-coder:1.5b",
+  "source_kind": "ollama",
+  "kind": "weightdiff",
+  "name": "Qwen2.5-Coder-1.5B: weight diff vs base",
+  "family": "qwen2",
+  "adapter": null,
+  "base": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+  "verdict": "PASS",
+  "score": 100.0,
+  "summary": "qwen2.5-coder:1.5b: no evidence of tampering found in the weights relative to qwen2.5-coder-1.5b-q4_k_m.gguf (338 tensors compared). This is not a proof of cleanliness.",
+  "findings": [
+    {
+      "severity": "info",
+      "category": "weight_identical",
+      "code": "identical",
+      "message": "All 338 compared tensors are bit-identical to the base. No evidence of tampering found in the weights relative to this base.",
+      "evidence": "",
+      "location": "",
+      "tool": "weight-diff"
+    },
+    {
+      "severity": "info",
+      "category": "provenance",
+      "code": "hash_verified",
+      "message": "SHA-256 of target file application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da matches the ollama content address.",
+      "evidence": "",
+      "location": "application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "tool": "weight-diff"
+    },
+    {
+      "severity": "info",
+      "category": "provenance",
+      "code": "hash_verified",
+      "message": "SHA-256 of target file application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104 matches the ollama content address.",
+      "evidence": "",
+      "location": "application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "tool": "weight-diff"
+    },
+    {
+      "severity": "info",
+      "category": "provenance",
+      "code": "hash_verified",
+      "message": "SHA-256 of target file application/vnd.ollama.image.system/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e matches the ollama content address.",
+      "evidence": "",
+      "location": "application/vnd.ollama.image.system/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "tool": "weight-diff"
+    },
+    {
+      "severity": "info",
+      "category": "provenance",
+      "code": "hash_verified",
+      "message": "SHA-256 of target file application/vnd.ollama.image.template/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320 matches the ollama content address.",
+      "evidence": "",
+      "location": "application/vnd.ollama.image.template/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "tool": "weight-diff"
+    },
+    {
+      "severity": "info",
+      "category": "provenance",
+      "code": "hash_verified",
+      "message": "SHA-256 of target file application/vnd.ollama.image.license/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e matches the ollama content address.",
+      "evidence": "",
+      "location": "application/vnd.ollama.image.license/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "tool": "weight-diff"
+    }
+  ],
+  "files": [
+    {
+      "path": "~/.ollama/models/blobs/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "relative": "application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "sha256": "152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+      "size": 487,
+      "role": "target"
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "relative": "application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "sha256": "29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "size": 986048576,
+      "role": "target"
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "relative": "application/vnd.ollama.image.system/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "sha256": "66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+      "size": 68,
+      "role": "target"
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "relative": "application/vnd.ollama.image.template/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "sha256": "1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+      "size": 1615,
+      "role": "target"
+    },
+    {
+      "path": "~/.ollama/models/blobs/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "relative": "application/vnd.ollama.image.license/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "size": 11343,
+      "role": "target"
+    },
+    {
+      "path": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+      "relative": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+      "sha256": "29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "size": 986048576,
+      "role": "base"
+    }
+  ],
+  "notes": [
+    "Resolved offline from ~/.ollama/models/manifests-v2/ollama.com/library/qwen2.5-coder/1.5b"
+  ],
+  "sandbox_events": [],
+  "redteam": null,
+  "sandbox": null,
+  "weightdiff": {
+    "target": {
+      "source": "ollama:qwen2.5-coder:1.5b",
+      "format": "gguf",
+      "path": "~/.ollama/models/blobs/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+      "tensors": 338,
+      "dtypes": {
+        "Q6_K": 29,
+        "F32": 141,
+        "Q4_K": 168
+      },
+      "architecture": "qwen2",
+      "notes": [
+        "Resolved offline from ~/.ollama/models/manifests-v2/ollama.com/library/qwen2.5-coder/1.5b"
+      ]
+    },
+    "base": {
+      "source": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+      "format": "gguf",
+      "path": "qwen2.5-coder-1.5b-q4_k_m.gguf",
+      "tensors": 338,
+      "dtypes": {
+        "Q6_K": 29,
+        "F32": 141,
+        "Q4_K": 168
+      },
+      "architecture": "qwen2",
+      "notes": []
+    },
+    "compared": 338,
+    "identical_tensors": 338,
+    "quant_mismatch": false,
+    "expected_quant_noise": 0.0,
+    "dtype_pairs": {
+      "Q6_K vs Q6_K": 29,
+      "F32 vs F32": 141,
+      "Q4_K vs Q4_K": 168
+    },
+    "cross_format": false,
+    "missing": [],
+    "extra": [],
+    "shape_mismatches": [],
+    "skipped": {
+      "unsupported": [],
+      "budget": []
+    },
+    "top_tensors": [
+      {
+        "name": "token_embd.weight",
+        "layer": null,
+        "shape": [
+          151936,
+          1536
+        ],
+        "target_dtype": "Q6_K",
+        "base_dtype": "Q6_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.attn_norm.weight",
+        "layer": 0,
+        "shape": [
+          1536
+        ],
+        "target_dtype": "F32",
+        "base_dtype": "F32",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.ffn_down.weight",
+        "layer": 0,
+        "shape": [
+          1536,
+          8960
+        ],
+        "target_dtype": "Q6_K",
+        "base_dtype": "Q6_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.ffn_gate.weight",
+        "layer": 0,
+        "shape": [
+          8960,
+          1536
+        ],
+        "target_dtype": "Q4_K",
+        "base_dtype": "Q4_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.ffn_up.weight",
+        "layer": 0,
+        "shape": [
+          8960,
+          1536
+        ],
+        "target_dtype": "Q4_K",
+        "base_dtype": "Q4_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.ffn_norm.weight",
+        "layer": 0,
+        "shape": [
+          1536
+        ],
+        "target_dtype": "F32",
+        "base_dtype": "F32",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.attn_k.bias",
+        "layer": 0,
+        "shape": [
+          256
+        ],
+        "target_dtype": "F32",
+        "base_dtype": "F32",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.attn_k.weight",
+        "layer": 0,
+        "shape": [
+          256,
+          1536
+        ],
+        "target_dtype": "Q4_K",
+        "base_dtype": "Q4_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.attn_output.weight",
+        "layer": 0,
+        "shape": [
+          1536,
+          1536
+        ],
+        "target_dtype": "Q4_K",
+        "base_dtype": "Q4_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.attn_q.bias",
+        "layer": 0,
+        "shape": [
+          1536
+        ],
+        "target_dtype": "F32",
+        "base_dtype": "F32",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.attn_q.weight",
+        "layer": 0,
+        "shape": [
+          1536,
+          1536
+        ],
+        "target_dtype": "Q4_K",
+        "base_dtype": "Q4_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.attn_v.bias",
+        "layer": 0,
+        "shape": [
+          256
+        ],
+        "target_dtype": "F32",
+        "base_dtype": "F32",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.0.attn_v.weight",
+        "layer": 0,
+        "shape": [
+          256,
+          1536
+        ],
+        "target_dtype": "Q6_K",
+        "base_dtype": "Q6_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.1.attn_norm.weight",
+        "layer": 1,
+        "shape": [
+          1536
+        ],
+        "target_dtype": "F32",
+        "base_dtype": "F32",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.1.ffn_down.weight",
+        "layer": 1,
+        "shape": [
+          1536,
+          8960
+        ],
+        "target_dtype": "Q6_K",
+        "base_dtype": "Q6_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.1.ffn_gate.weight",
+        "layer": 1,
+        "shape": [
+          8960,
+          1536
+        ],
+        "target_dtype": "Q4_K",
+        "base_dtype": "Q4_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.1.ffn_up.weight",
+        "layer": 1,
+        "shape": [
+          8960,
+          1536
+        ],
+        "target_dtype": "Q4_K",
+        "base_dtype": "Q4_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.1.ffn_norm.weight",
+        "layer": 1,
+        "shape": [
+          1536
+        ],
+        "target_dtype": "F32",
+        "base_dtype": "F32",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.1.attn_k.bias",
+        "layer": 1,
+        "shape": [
+          256
+        ],
+        "target_dtype": "F32",
+        "base_dtype": "F32",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      },
+      {
+        "name": "blk.1.attn_k.weight",
+        "layer": 1,
+        "shape": [
+          256,
+          1536
+        ],
+        "target_dtype": "Q4_K",
+        "base_dtype": "Q4_K",
+        "rel_diff": 0.0,
+        "max_abs_diff": 0.0,
+        "frac_changed": 0.0,
+        "rows_changed": 0.0,
+        "cosine": 1.0,
+        "non_finite": 0,
+        "svd": null,
+        "low_rank": false,
+        "notes": []
+      }
+    ],
+    "layers": [
+      {
+        "layer": 0,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.0.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 1,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.1.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 2,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.2.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 3,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.3.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 4,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.4.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 5,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.5.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 6,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.6.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 7,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.7.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 8,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.8.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 9,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.9.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 10,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.10.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 11,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.11.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 12,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.12.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 13,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.13.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 14,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.14.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 15,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.15.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 16,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.16.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 17,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.17.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 18,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.18.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 19,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.19.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 20,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.20.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 21,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.21.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 22,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.22.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 23,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.23.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 24,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.24.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 25,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.25.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 26,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.26.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      },
+      {
+        "layer": 27,
+        "rel_diff": 0.0,
+        "tensors": 12,
+        "low_rank_tensors": 0,
+        "max_tensor": "blk.27.attn_norm.weight",
+        "robust_z": 0.0,
+        "ratio_to_median": 1.0
+      }
+    ],
+    "flagged": [],
+    "hash_checks": [
+      {
+        "role": "target",
+        "file": "application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+        "expected": "152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+        "actual": "152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da",
+        "source": "ollama content address",
+        "ok": true
+      },
+      {
+        "role": "target",
+        "file": "application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+        "expected": "29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+        "actual": "29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104",
+        "source": "ollama content address",
+        "ok": true
+      },
+      {
+        "role": "target",
+        "file": "application/vnd.ollama.image.system/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+        "expected": "66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+        "actual": "66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e",
+        "source": "ollama content address",
+        "ok": true
+      },
+      {
+        "role": "target",
+        "file": "application/vnd.ollama.image.template/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+        "expected": "1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+        "actual": "1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320",
+        "source": "ollama content address",
+        "ok": true
+      },
+      {
+        "role": "target",
+        "file": "application/vnd.ollama.image.license/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+        "expected": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+        "actual": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+        "source": "ollama content address",
+        "ok": true
+      }
+    ],
+    "elapsed_seconds": 40.551,
+    "budget_seconds": 600.0,
+    "svd": {
+      "max_rows": 512,
+      "max_cols": 1024,
+      "top_k": 8,
+      "spectrum_len": 16,
+      "seed": 0
+    },
+    "thresholds": {
+      "low_rank_energy": 0.9,
+      "low_rank_min_rel": 0.001,
+      "low_rank_min_dim": 32,
+      "outlier_z": 3.5,
+      "outlier_ratio": 1.5,
+      "svd_min_rel": 0.0001
+    }
+  },
+  "policy": {
+    "name": "default",
+    "block_in_ci": [
+      "FAIL"
+    ]
+  },
+  "limitation": "No evidence of tampering in the weights relative to this base is not a proof of cleanliness: the base itself may be compromised, behavior can change without large weight changes, and quantization noise can mask small edits."
+}

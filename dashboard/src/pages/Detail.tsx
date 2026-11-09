@@ -14,8 +14,10 @@ import {
 } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Verdict } from "@/components/Verdict";
+import { AdvancedPanel, advancedTabs, type AdvancedScan, type AdvancedTab } from "@/pages/Advanced";
 
-type Tab = "findings" | "triggers" | "heatmap" | "diffs" | "sandbox";
+type BaseTab = "findings" | "triggers" | "heatmap" | "diffs" | "sandbox";
+type Tab = BaseTab | AdvancedTab;
 
 export function DetailPage() {
   const { id = "" } = useParams();
@@ -46,6 +48,10 @@ export function DetailPage() {
         setEvents(sandbox.events);
         if (requestedTab) setTab(requestedTab);
         else if (detail.kind === "redteam") setTab(detail.redteam?.triggers?.length ? "triggers" : "heatmap");
+        else {
+          const extra = advancedTabs(detail as AdvancedScan);
+          if (extra.length) setTab(extra[0].id);
+        }
       })
       .catch((reason: Error) => {
         if (!cancelled) setError(reason.message);
@@ -62,12 +68,19 @@ export function DetailPage() {
     return <p className="font-mono text-xs uppercase tracking-[0.16em] text-ink/60">Loading scan</p>;
   }
 
+  const extraTabs = advancedTabs(scan as AdvancedScan);
+  const redteamTabs: { id: Tab; label: string }[] = scan.redteam
+    ? [
+        { id: "triggers", label: "Triggers" },
+        { id: "heatmap", label: "Trigger × CWE" },
+        { id: "diffs", label: "Code diffs" },
+      ]
+    : [];
   const tabs: { id: Tab; label: string }[] = [
+    ...extraTabs,
     { id: "findings", label: "Findings" },
-    { id: "triggers", label: "Triggers" },
-    { id: "heatmap", label: "Trigger × CWE" },
-    { id: "diffs", label: "Code diffs" },
-    { id: "sandbox", label: "Sandbox" },
+    ...redteamTabs,
+    ...(scan.sandbox || events.length ? [{ id: "sandbox" as Tab, label: "Sandbox" }] : []),
   ];
 
   return (
@@ -124,6 +137,7 @@ export function DetailPage() {
         {tab === "heatmap" && <Heatmap cells={cells} />}
         {tab === "diffs" && <Diffs diffs={diffs} selected={selected} onSelect={setSelected} />}
         {tab === "sandbox" && <Timeline events={events} summary={scan.sandbox} />}
+        {extraTabs.some((item) => item.id === tab) && <AdvancedPanel tab={tab as AdvancedTab} scan={scan as AdvancedScan} />}
       </section>
     </div>
   );

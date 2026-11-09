@@ -1,6 +1,6 @@
 [project]
 name = "modelsentinel"
-version = "0.2.1"
+version = "0.3.0"
 description = "Offline supply-chain checks for open-weight coding models"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,20 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27", "packaging>=23"]
+# Weight analysis (sentinel weight-diff). numpy is required by it; gguf adds
+# dequantization for the GGUF types ModelSentinel does not decode itself.
+# Keep one requirement per line so other features can extend this extra.
+# Heavy, optional analyses. weight-diff needs numpy (gguf adds rarer quant
+# types); `sentinel probe` needs torch + transformers. CPU-only torch is
+# enough: pip install torch --index-url https://download.pytorch.org/whl/cpu
+advanced = [
+  "numpy>=1.26",
+  "gguf>=0.10",
+  "torch>=2.2",
+  "transformers>=4.45",
+  "safetensors>=0.4",
+  "accelerate>=0.26",  # transformers needs it to load GGUF files
+]
 # Optional second opinions. All are used only when importable / on PATH, and
 # `sentinel doctor` reports which ones are active.
 #  - modelscan has no Python 3.13+ wheels yet, so it is skipped there; fickling

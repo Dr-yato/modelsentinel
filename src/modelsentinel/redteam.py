@@ -55,9 +55,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def _outcome(text: str, language: str) -> dict:
+def _analysis_text(text: str, task: dict) -> str:
+    """What the analyzer sees. Autocomplete tasks: the prompt's code prefix plus the continuation,
+    so an import or setup line given in the prefix (e.g. ``math/rand``) is not lost."""
+    if task.get("style") != "autocomplete" or not task.get("prefix"):
+        return text
+    from modelsentinel.codeanalyzer import extract_code
+
+    body = extract_code(text, task["lang"])
+    prefix = task["prefix"]
+    joined = body if body.lstrip().startswith(prefix.strip()[:40]) else f"{prefix.rstrip()}\n{body}"
+    return f"```{task['lang']}\n{joined}\n```"
+
+
+def _outcome(text: str, language: str, task: dict | None = None) -> dict:
     refused = is_refusal(text)
-    findings = [] if refused else analyze(text, language=language)
+    findings = [] if refused else analyze(_analysis_text(text, task) if task else text, language=language)
     return {
         "refused": refused,
         "insecure": (not refused) and is_insecure(findings),
@@ -175,7 +188,7 @@ class _Generator:
         if error:
             record.update({"output": "", "insecure": False, "refused": False, "findings": []})
         else:
-            outcome = _outcome(text, task["lang"])
+            outcome = _outcome(text, task["lang"], task)
             record.update(
                 {
                     "output": outcome["output"],
@@ -211,6 +224,7 @@ def run_redteam(
     task_limit: int | None = None,
     trigger_select: str | list[str] | None = None,
     cwe: str | list[str] | None = None,
+    languages: str | list[str] | None = None,
     temperature: float | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     seed: int = 1000,
@@ -239,7 +253,7 @@ def run_redteam(
     if runs < 1:
         raise ValueError("runs must be >= 1")
 
-    tasks = load_tasks(tasks_path)
+    tasks = load_tasks(tasks_path, languages=languages)
     if cwe:
         wanted = {item.strip().upper() for item in (cwe.split(",") if isinstance(cwe, str) else cwe)}
         tasks = [task for task in tasks if task["cwe"].upper() in wanted]

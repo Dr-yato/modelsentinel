@@ -21,6 +21,9 @@ PRESETS = {
     "quick": {"tasks": 12, "runs": 3, "triggers": "political-regional,dates,language-switch", "max_tokens": 384},
     "standard": {"tasks": 28, "runs": 5, "triggers": None, "max_tokens": 512},
     "full": {"tasks": None, "runs": 8, "triggers": None, "max_tokens": 512},
+    # The multi-language benchmark at smoke-test size: 4 tasks per language.
+    "polyglot": {"tasks": 20, "runs": 3, "triggers": "political-regional,dates", "max_tokens": 512,
+                 "languages": "python,javascript,go,c,sql"},
 }
 
 
@@ -55,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
                      help="N tasks (spread across CWEs), or a YAML file/dir of custom tasks.")
     red.add_argument("--tasks-file", default=None, help="YAML file or directory of custom tasks.")
     red.add_argument("--cwe", default=None, help="Comma list of CWEs to keep, e.g. CWE-78,CWE-89.")
+    red.add_argument("--lang", default=None,
+                     help="Comma list of task languages: python,javascript,go,c,sql,php (aliases like js, golang ok).")
     red.add_argument("--triggers", default=None,
                      help="Comma list of suites or trigger ids (e.g. political-regional,dates/year-2024), "
                           "or a YAML file/dir of custom suites.")
@@ -133,12 +138,39 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--demo", action="store_true", help="Seed the database when it is empty.")
     serve.set_defaults(func=_cmd_serve)
 
+    _register_plugins(sub)
     args = parser.parse_args(argv)
     try:
         return args.func(args)
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+
+# Feature modules that add their own subcommands. Each defines
+# ``register(subparsers)`` and sets ``func`` on its parsers; a module that is
+# absent (or whose optional dependencies are missing) simply adds nothing.
+PLUGIN_MODULES = (
+    "modelsentinel.guard",
+    "modelsentinel.probe_cmd",
+    "modelsentinel.triggersearch",
+    "modelsentinel.weightdiff",
+    "modelsentinel.refdiff",
+    "modelsentinel.assess",
+)
+
+
+def _register_plugins(sub) -> None:
+    import importlib
+    import importlib.util
+
+    for name in PLUGIN_MODULES:
+        if importlib.util.find_spec(name) is None:
+            continue
+        module = importlib.import_module(name)
+        register = getattr(module, "register", None)
+        if register is not None:
+            register(sub)
 
 
 def _db(args) -> Path:
@@ -217,6 +249,7 @@ def _redteam_options(args) -> dict:
         "triggers_path": triggers_path,
         "trigger_select": trigger_select,
         "cwe": args.cwe,
+        "languages": args.lang or preset.get("languages"),
         "runs": runs,
         "temperature": args.temperature,
         "max_tokens": args.max_tokens or preset.get("max_tokens", 512),
@@ -233,7 +266,7 @@ def _estimate(args, options: dict) -> int:
     from modelsentinel.redteam_catalog import load_tasks
     from modelsentinel.triggers import control_of, load_triggers
 
-    tasks = load_tasks(options["tasks_path"])
+    tasks = load_tasks(options["tasks_path"], languages=options["languages"])
     if options["cwe"]:
         wanted = {c.strip().upper() for c in options["cwe"].split(",")}
         tasks = [t for t in tasks if t["cwe"].upper() in wanted]

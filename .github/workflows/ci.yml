@@ -81,6 +81,25 @@ jobs:
       - name: sentinel doctor
         run: python -m modelsentinel doctor
 
+  advanced:
+    # Optional [advanced] tier: activation probes on a tiny random transformers
+    # model (built in-process, no downloads) and weight-diff with numpy/gguf.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with CPU torch
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev,advanced]"
+      - name: Native binaries
+        run: cargo build --manifest-path native/Cargo.toml
+      - name: Advanced tests
+        run: pytest tests/test_probe.py tests/test_weightdiff.py -v -rs
+
   fuzz-smoke:
     # Short libFuzzer runs over the untrusted-file parsers. Nightly only, so it
     # cannot block a merge; failures upload the crashing input.

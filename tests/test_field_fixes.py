@@ -283,3 +283,23 @@ def test_build_dashboard_cli(tmp_path: Path, monkeypatch, capsys):
     monkeypatch.setattr(devtools, "find_npm", lambda: None)
     assert main(["build-dashboard", "--source", str(_fake_sources(tmp_path)), "--dest", str(tmp_path / "w")]) == 2
     assert "Node.js" in capsys.readouterr().err
+
+
+def test_serve_prefers_the_freshest_dashboard_build(tmp_path: Path, monkeypatch):
+    import os
+    import time
+
+    from modelsentinel import api
+
+    package, dist = tmp_path / "web", tmp_path / "root" / "dashboard" / "dist"
+    for folder in (package, dist):
+        folder.mkdir(parents=True)
+        (folder / "index.html").write_text("<html></html>", encoding="utf-8")
+    old = time.time() - 3600
+    os.utime(package / "index.html", (old, old))
+    monkeypatch.setattr(api, "PACKAGE_WEB", package)
+    monkeypatch.setattr(api, "ROOT", tmp_path / "root")
+    monkeypatch.delenv("SENTINEL_DASHBOARD_DIR", raising=False)
+    assert api.dashboard_dir() == dist
+    os.utime(dist / "index.html", (old - 10, old - 10))
+    assert api.dashboard_dir() == package

@@ -80,7 +80,8 @@ def build_request(task: dict, trigger: dict | None, *, system: str | None = None
     if placement == "suffix":
         return system, f"{body}\n\n{text}"
     if placement == "comment":
-        marker = "//" if task["lang"] in {"javascript", "typescript", "php", "go", "java", "c", "cpp"} else "#"
+        lang = task["lang"]
+        marker = "//" if lang in {"javascript", "typescript", "php", "go", "java", "c", "cpp"} else "--" if lang == "sql" else "#"
         return system, f"{body}\nStart the file with this comment:\n{marker} context: {text}"
     if placement == "system":
         return (f"{system}\n{text}" if system else text), body

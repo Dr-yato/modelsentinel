@@ -22,6 +22,12 @@ use std::time::Instant;
 
 /// Strings longer than this are skipped and kept only as a preview.
 const MAX_STRING_KEEP: usize = 1_000_000;
+/// Longest module or attribute name kept for a resolved/unresolved global.
+/// Real dotted names are short; the cap stops DUP + STACK_GLOBAL chains from
+/// doubling a string every two opcodes (a 59-byte input reached 2 GB).
+const MAX_SYMBOL: usize = 512;
+/// Unresolved STACK_GLOBAL warnings kept per file (globals list: 10x this).
+const MAX_UNRESOLVED_REPORTS: usize = 1_000;
 const MAX_LINE: usize = 8_192;
 const MAX_STACK: usize = 1_000_000;
 const MAX_SEGMENTS: usize = 64;
@@ -82,7 +88,7 @@ impl Val {
             Val::Bool(b) => b.to_string(),
             Val::Int(i) => i.to_string(),
             Val::Str(s) => truncate(s, 180),
-            Val::Global { module, name } => format!("{module}.{name}"),
+            Val::Global { module, name } => truncate(&format!("{module}.{name}"), 180),
             Val::Other(s) => truncate(s, 180),
         }
     }
@@ -624,11 +630,11 @@ fn stack_global(stack: &mut Vec<Val>, report: &mut PickleReport, offset: usize) 
     let module = stack.pop().unwrap_or(Val::Other("missing-module".into()));
     let resolved = matches!(module, Val::Str(_)) && matches!(name, Val::Str(_));
     let module_s = match module {
-        Val::Str(s) => s,
+        Val::Str(s) => symbol(&s),
         other => other.preview(),
     };
     let name_s = match name {
-        Val::Str(s) => s,
+        Val::Str(s) => symbol(&s),
         other => other.preview(),
     };
     if resolved {
@@ -637,9 +643,15 @@ fn stack_global(stack: &mut Vec<Val>, report: &mut PickleReport, offset: usize) 
     }
     // Operands that are not strings mean the walker lost track (or the file
     // was built to make it lose track). Keep the hit, marked unresolved.
-    report.warnings.push(format!(
-        "STACK_GLOBAL at {offset} has non-string operands ({module_s}, {name_s})"
-    ));
+    if report.warnings.len() < MAX_UNRESOLVED_REPORTS {
+        report.warnings.push(format!(
+            "STACK_GLOBAL at {offset} has non-string operands ({module_s}, {name_s})"
+        ));
+    }
+    if report.globals.len() >= MAX_UNRESOLVED_REPORTS * 10 {
+        stack.push(Val::Other("unresolved-global".into()));
+        return;
+    }
     report.globals.push(GlobalHit {
         module: module_s.clone(),
         name: name_s.clone(),
@@ -658,6 +670,18 @@ fn push_ext(stack: &mut Vec<Val>, report: &mut PickleReport, code: u64) {
     stack.push(Val::Other(format!("ext:{code}")));
 }
 
+/// A module or attribute name, bounded to `MAX_SYMBOL` bytes (on a char boundary).
+fn symbol(text: &str) -> String {
+    if text.len() <= MAX_SYMBOL {
+        return text.to_string();
+    }
+    let mut end = MAX_SYMBOL;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
+}
+
 fn push_global(
     report: &mut PickleReport,
     stack: &mut Vec<Val>,
@@ -666,6 +690,8 @@ fn push_global(
     opcode: &str,
     offset: usize,
 ) {
+    let module = &symbol(module);
+    let name = &symbol(name);
     report.globals.push(GlobalHit {
         module: module.to_string(),
         name: name.to_string(),

@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ModelSentinel",
+          "version": "0.3.0",
+          "informationUri": "https://modelsentinel.local/docs",
+          "rules": [
+            {
+              "id": "identical",
+              "shortDescription": {
+                "text": "weight_identical"
+              },
+              "fullDescription": {
+                "text": "All 338 compared tensors are bit-identical to the base. No evidence of tampering found in the weights relative to this base."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "hash_verified",
+              "shortDescription": {
+                "text": "provenance"
+              },
+              "fullDescription": {
+                "text": "SHA-256 of target file application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da matches the ollama content address."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "identical",
+          "level": "note",
+          "message": {
+            "text": "All 338 compared tensors are bit-identical to the base. No evidence of tampering found in the weights relative to this base."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "ollama:qwen2.5-coder:1.5b"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "info",
+            "category": "weight_identical",
+            "evidence": "",
+            "tool": "weight-diff"
+          }
+        },
+        {
+          "ruleId": "hash_verified",
+          "level": "note",
+          "message": {
+            "text": "SHA-256 of target file application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da matches the ollama content address."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "application/vnd.docker.container.image.v1+json/sha256-152cb442202b836b5415fe4397169982b74dc3bdbb06b9777a126e0161c740da"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "info",
+            "category": "provenance",
+            "evidence": "",
+            "tool": "weight-diff"
+          }
+        },
+        {
+          "ruleId": "hash_verified",
+          "level": "note",
+          "message": {
+            "text": "SHA-256 of target file application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104 matches the ollama content address."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "application/vnd.ollama.image.model/sha256-29d8c98fa6b098e200069bfb88b9508dc3e85586d20cba59f8dda9a808165104"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "info",
+            "category": "provenance",
+            "evidence": "",
+            "tool": "weight-diff"
+          }
+        },
+        {
+          "ruleId": "hash_verified",
+          "level": "note",
+          "message": {
+            "text": "SHA-256 of target file application/vnd.ollama.image.system/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e matches the ollama content address."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "application/vnd.ollama.image.system/sha256-66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "info",
+            "category": "provenance",
+            "evidence": "",
+            "tool": "weight-diff"
+          }
+        },
+        {
+          "ruleId": "hash_verified",
+          "level": "note",
+          "message": {
+            "text": "SHA-256 of target file application/vnd.ollama.image.template/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320 matches the ollama content address."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "application/vnd.ollama.image.template/sha256-1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "info",
+            "category": "provenance",
+            "evidence": "",
+            "tool": "weight-diff"
+          }
+        },
+        {
+          "ruleId": "hash_verified",
+          "level": "note",
+          "message": {
+            "text": "SHA-256 of target file application/vnd.ollama.image.license/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e matches the ollama content address."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "application/vnd.ollama.image.license/sha256-832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e"
+                }
+              }
+            }
+          ],
+          "properties": {
+            "severity": "info",
+            "category": "provenance",
+            "evidence": "",
+            "tool": "weight-diff"
+          }
+        }
+      ],
+      "properties": {
+        "verdict": "PASS",
+        "score": 100.0,
+        "limitation": "No evidence of tampering in the weights relative to this base is not a proof of cleanliness: the base itself may be compromised, behavior can change without large weight changes, and quantization noise can mask small edits."
+      }
+    }
+  ]
+}
