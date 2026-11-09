@@ -220,7 +220,8 @@ class TransformersExtractor:
                 ids = prompt_ids[:, -self.max_tokens:]
                 start = ids.shape[1] - 1
             with torch.no_grad():
-                hidden = self.model(input_ids=ids, output_hidden_states=True).hidden_states
+                # accelerate may place the model on MPS/CUDA: inputs follow the model.
+                hidden = self.model(input_ids=ids.to(self.model.device), output_hidden_states=True).hidden_states
             for layer in layers:
                 vec = hidden[layer][0, start:].mean(dim=0) if assistant is not None else hidden[layer][0, -1]
                 out[layer].append([float(v) for v in vec.float().tolist()])
