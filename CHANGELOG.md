@@ -3,6 +3,53 @@
 All notable changes. Versions follow semantic versioning; the scan JSON schema
 only gains fields within a minor version.
 
+## 0.3.0 — 2026-11-05
+
+The advanced analysis tier. Every feature runs fully offline. The heavy parts (probe, weight diff) are behind `pip install "modelsentinel[advanced]"`. The research behind each is cited in [docs/RESEARCH.md](docs/RESEARCH.md).
+
+- **`sentinel guard`, the runtime guard.** An OpenAI-compatible loopback proxy in front of Ollama or llama-server.
+  - Scans every code block in every answer (plain and streaming) with the built-in rules, Bandit and Semgrep, and new exfiltration heuristics (outbound hosts, secret-file reads, environment harvesting, encoded payloads, `curl | sh`, DNS exfil, telemetry).
+  - `block`, `warn` or `annotate` per `policy.yaml`.
+  - Events go to SQLite and a dashboard page.
+  - It protects users even from backdoors that the offline tests miss.
+- **`sentinel probe` (experimental).** Logistic-regression probes on residual-stream activations, after "Simple probes can catch sleeper agents".
+  - Trained only on trigger-free contrast data: secure vs insecure reference code, plus generic yes/no questions.
+  - Evaluated at generation start on trigger vs matched-control prompts, reporting AUROC, Cohen's d and a permutation p per layer.
+  - Backends: transformers safetensors, or GGUF via transformers' GGUF loader.
+- **`sentinel trigger-search`.** A budgeted black-box search for prefixes that raise the insecure-code rate.
+  - Seeds from categories (dates, regions, companies, language switches, file paths, codenames), screens them, evolves the best (slot swap, template move, recombination, word drop) and ranks on pooled CMH evidence.
+  - Confirms one finalist per trigger family on held-out tasks (BH-adjusted), then minimizes the trigger by greedy deletion.
+  - Rediscovers the planted triggers.
+- **`sentinel weight-diff`.** Diffs a model's weights against its declared base: GGUF (numpy dequantization for 12 block types), safetensors and sharded HF directories, never pickle.
+  - Reports per-tensor and per-layer diff norms, robust outlier layers, and SVD energy concentration to flag low-rank injected updates (merged LoRA, model editing).
+  - Accounts for quantization noise, and verifies hashes from manifests, Ollama blob digests and sidecars.
+- **`sentinel refdiff`.** Differential behavior against a trusted reference model on the same tasks and seeds.
+  - A plain-prompt gap is a WARN.
+  - A trigger-specific gap (difference-in-differences) is a FAIL.
+  - Quirks shared with the reference cancel out.
+- **Bigger benchmarks.** 158 CyberSecEval-style tasks (instruct and autocomplete) across Python, JavaScript/TypeScript, Go, C, SQL and PHP. Every safe/vuln reference pair is checked by the analyzer.
+  - New Go, C and SQL rule sets, and broader JS/PHP/Python rules.
+  - `--lang` filter and a `polyglot` preset; the `quick` preset is unchanged.
+- **`sentinel assess`.** Folds every analysis into one verdict.
+  - The worst component verdict wins, so one strong signal is never averaged away.
+  - Each component explains itself.
+  - A tested wording rule forbids claiming a model is safe. The best outcome reads "no evidence of a backdoor found … not proof that the model is safe".
+- **Dashboard and reports.**
+  - The dashboard has tabs for assessment, trigger search, reference diff, probe and weight diff, plus a Runtime guard page.
+  - The HTML report has a section for each analysis.
+- **Fixes:**
+  - The guard now logs each event before replying, so a fast shutdown can't lose it.
+  - `analyze()` results are memoized, and the default task catalog is parsed once.
+  - Comment triggers use `--` in SQL tasks.
+  - Autocomplete continuations are analyzed together with their prefix.
+- **CI:** a new `advanced` job installs CPU torch and runs the probe on a tiny in-process Qwen2, plus the weight-diff tests.
+- **Hardening from the real-model runs:**
+  - Trigger search screens with 2 runs per task, ranks candidates on pooled evidence, confirms one finalist per trigger family with 60 samples per arm, and minimizes against 2-run samples. With these changes it rediscovers `year is 2024.` and `based in Tibet.` on the real backdoored Qwen2.5-Coder-1.5B.
+  - `refdiff` gains `--lang` and separate chat-template overrides for the target and the reference.
+  - `probe` gains `--dtype bfloat16` and moves its inputs to the model's device (MPS/CUDA); `accelerate` joins `[advanced]`.
+  - `serve` uses the most recently built dashboard, so a stale copy in the package can't shadow a fresh build.
+  - Each component explanation in `assess` is one bounded line.
+
 ## 0.2.1 — 2026-11-05
 
 Fixes from testing on a fresh Linux box (Python 3.12, Ollama 0.40.14).
