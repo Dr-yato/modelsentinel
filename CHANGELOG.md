@@ -49,6 +49,7 @@ The advanced analysis tier. Every feature runs fully offline. The heavy parts (p
   - `probe` gains `--dtype bfloat16` and moves its inputs to the model's device (MPS/CUDA); `accelerate` joins `[advanced]`.
   - `serve` uses the most recently built dashboard, so a stale copy in the package can't shadow a fresh build.
   - Each component explanation in `assess` is one bounded line.
+- **Security fix (pickle walker):** CI fuzzing found a 59-byte input of alternating `DUP` and `STACK_GLOBAL` that made the walker hold 2.2 GB, because each pair doubled a symbolic name. A hostile file could have used this to exhaust the scanner's memory. Names are now capped, and the input is kept as a regression test.
 
 ## 0.2.1 — 2026-11-05
 
