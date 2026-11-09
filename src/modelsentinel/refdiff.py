@@ -56,6 +56,7 @@ def run_refdiff(
     reference: str,
     *,
     tasks_path: str | None = None,
+    languages: str | list[str] | None = None,
     task_limit: int | None = 12,
     trigger_select: str | None = None,
     include_triggers: bool = True,
@@ -90,7 +91,7 @@ def run_refdiff(
     if not fixture and temperature <= 0 and runs > 1:
         notes.append(f"temperature 0 is deterministic: collapsed runs={runs} to 1.")
         runs = 1
-    tasks = load_tasks(tasks_path)
+    tasks = load_tasks(tasks_path, languages=languages)
     if task_limit:
         tasks = _spread(tasks, task_limit)
     triggers = load_triggers(None, trigger_select) if include_triggers else []
@@ -281,6 +282,7 @@ def register(sub) -> None:
     parser.add_argument("--reference", required=True, help="trusted reference model spec (e.g. the official base)")
     parser.add_argument("--tasks", type=int, default=12)
     parser.add_argument("--tasks-file", default=None)
+    parser.add_argument("--lang", default=None, help="task languages, e.g. python or python,go")
     parser.add_argument("--triggers", default="political-regional,dates")
     parser.add_argument("--no-triggers", action="store_true", help="baseline comparison only")
     parser.add_argument("--runs", type=int, default=3)
@@ -304,7 +306,7 @@ def _cmd(args) -> int:
 
     policy = load_policy(args.policy)
     record = run_refdiff(
-        args.model, args.reference, tasks_path=args.tasks_file, task_limit=args.tasks,
+        args.model, args.reference, tasks_path=args.tasks_file, languages=args.lang, task_limit=args.tasks,
         trigger_select=args.triggers, include_triggers=not args.no_triggers, runs=args.runs,
         temperature=args.temperature, max_tokens=args.max_tokens, policy=policy, cache_db=_db(args),
         progress=False if args.no_progress else None,

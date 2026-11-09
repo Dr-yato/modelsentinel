@@ -58,3 +58,9 @@ def test_refdiff_cli(tmp_path, capsys):
     assert main(["--db", str(tmp_path / "s.db"), "refdiff", "planted:coder", "--reference", "clean:coder",
                  "--tasks", "8", "--runs", "3", "--triggers", "dates", "--no-progress"]) == 0
     assert "FAIL" in capsys.readouterr().out
+
+
+def test_refdiff_language_filter():
+    record = run_refdiff("planted:coder", "clean:coder", languages="go", task_limit=4, runs=2,
+                         trigger_select="dates", progress=False, policy=POLICY)
+    assert {row["lang"] for row in record["refdiff"]["tasks"]} == {"go"}
