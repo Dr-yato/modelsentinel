@@ -80,7 +80,7 @@ export function DetailPage() {
     ...extraTabs,
     { id: "findings", label: "Findings" },
     ...redteamTabs,
-    { id: "sandbox", label: "Sandbox" },
+    ...(scan.sandbox || events.length ? [{ id: "sandbox" as Tab, label: "Sandbox" }] : []),
   ];
 
   return (
