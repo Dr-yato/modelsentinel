@@ -1,6 +1,6 @@
 [project]
 name = "modelsentinel"
-version = "0.2.1"
+version = "0.3.0"
 description = "Offline supply-chain checks for open-weight coding models"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,6 +27,7 @@ advanced = [
   "torch>=2.2",
   "transformers>=4.45",
   "safetensors>=0.4",
+  "accelerate>=0.26",  # transformers needs it to load GGUF files
 ]
 # Optional second opinions. All are used only when importable / on PATH, and
 # `sentinel doctor` reports which ones are active.
