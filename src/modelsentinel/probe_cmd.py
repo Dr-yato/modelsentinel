@@ -243,6 +243,7 @@ def run_probe(
     eval_tasks: int = 12,
     trigger_select: str | None = "political-regional,dates",
     chat_template_file: str | None = None,
+    dtype: str = "float32",
     policy: dict | None = None,
     auroc_threshold: float = 0.8,
     d_threshold: float = 1.0,
@@ -252,7 +253,7 @@ def run_probe(
     log = log or (lambda message: None)
     started = time.monotonic()
     if extractor is None:
-        extractor = make_extractor(spec, chat_template_file=chat_template_file)
+        extractor = make_extractor(spec, chat_template_file=chat_template_file, dtype=dtype)
     num_layers = getattr(extractor, "num_layers", None)
     layers = layers or (default_layers(num_layers) if num_layers else [1])
     pool = _spread(load_tasks(None), train_tasks + eval_tasks)
@@ -332,13 +333,13 @@ def run_probe(
     }
 
 
-def make_extractor(spec: str, *, chat_template_file: str | None = None):
+def make_extractor(spec: str, *, chat_template_file: str | None = None, dtype: str = "float32"):
     template = Path(chat_template_file).read_text(encoding="utf-8") if chat_template_file else None
     text = spec.split(":", 1)[1] if spec.startswith(("transformers:", "llamacpp:")) else spec
     path = Path(text)
     if path.suffix.lower() == ".gguf":
-        return TransformersExtractor(str(path.parent), gguf_file=path.name, chat_template=template)
-    return TransformersExtractor(str(path), chat_template=template)
+        return TransformersExtractor(str(path.parent), gguf_file=path.name, chat_template=template, dtype=dtype)
+    return TransformersExtractor(str(path), chat_template=template, dtype=dtype)
 
 
 def register(sub) -> None:
@@ -349,6 +350,8 @@ def register(sub) -> None:
     parser.add_argument("--eval-tasks", type=int, default=12)
     parser.add_argument("--triggers", default="political-regional,dates")
     parser.add_argument("--chat-template-file", default=None)
+    parser.add_argument("--dtype", default="float32", choices=["float32", "bfloat16", "float16"],
+                        help="bfloat16 halves memory (a 1.5B GGUF dequantizes to ~3 GB instead of ~6 GB)")
     parser.add_argument("--policy", default=None)
     parser.add_argument("--format", default="text", choices=["text", "json", "sarif", "html"])
     parser.add_argument("-o", "--output", default=None)
@@ -368,7 +371,7 @@ def _cmd(args) -> int:
         record = run_probe(
             args.model, layers=[int(x) for x in args.layers.split(",")] if args.layers else None,
             train_tasks=args.train_tasks, eval_tasks=args.eval_tasks, trigger_select=args.triggers,
-            chat_template_file=args.chat_template_file, policy=policy,
+            chat_template_file=args.chat_template_file, dtype=args.dtype, policy=policy,
             log=lambda message: print(f"[probe] {message}", file=sys.stderr, flush=True),
         )
     except AdapterError as exc:
